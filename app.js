@@ -423,6 +423,29 @@ function analyzeSymbol(bars) {
   return { wave, confidence, rsiSeries, latestRsi, divergence, sr, forecast };
 }
 
+function getVisibleFibOverlay(bars, analysis) {
+  if (analysis?.wave?.fibLevels?.length) {
+    return {
+      source: "wave",
+      levels: analysis.wave.fibLevels,
+    };
+  }
+  if (!Array.isArray(bars) || bars.length < 2) {
+    return { source: "range", levels: [] };
+  }
+  let highBar = bars[0];
+  let lowBar = bars[0];
+  bars.forEach((bar) => {
+    if (bar.h > highBar.h) highBar = bar;
+    if (bar.l < lowBar.l) lowBar = bar;
+  });
+  const direction = highBar.date >= lowBar.date ? "up" : "down";
+  return {
+    source: "range",
+    levels: buildFibLevels(lowBar.l, highBar.h, direction),
+  };
+}
+
 function sortedTickers() {
   const list = [...state.tickers];
   if (state.sort === "score") {
@@ -616,22 +639,6 @@ function drawChart() {
     ctx.fillRect(chartLeft, Math.min(y1, y2), chartW, Math.abs(y2 - y1));
   }
 
-  if (state.overlays.fibs && analysis?.wave?.fibLevels) {
-    analysis.wave.fibLevels.forEach((fib) => {
-      const y = py(fib.price);
-      if (y < chartTop || y > chartBottom) return;
-      ctx.setLineDash(fib.extension ? [6, 5] : [3, 5]);
-      ctx.strokeStyle = fib.extension ? "rgba(33,212,212,0.6)" : "rgba(248,193,74,0.45)";
-      ctx.beginPath();
-      ctx.moveTo(chartLeft, y);
-      ctx.lineTo(chartRight, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = fib.extension ? "#21d4d4" : "#f8c14a";
-      ctx.fillText(`${fib.label} ${formatPrice(fib.price)}`, chartLeft + 6, y - 4);
-    });
-  }
-
   if (state.overlays.sr && analysis?.sr) {
     analysis.sr.forEach((level) => {
       const y = py(level.price);
@@ -675,6 +682,48 @@ function drawChart() {
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
+
+  if (state.overlays.fibs) {
+    const fibOverlay = getVisibleFibOverlay(bars, analysis);
+    const visibleLevels = fibOverlay.levels.filter((fib) => {
+      const y = py(fib.price);
+      return y >= chartTop && y <= chartBottom;
+    });
+    visibleLevels.forEach((fib) => {
+      const y = py(fib.price);
+      const isKey = fib.ratio === 0.382 || fib.ratio === 0.5 || fib.ratio === 0.618 || fib.ratio === 1;
+      const color = fib.extension ? "#0ea5e9" : "#7c3aed";
+      if (isKey) {
+        ctx.fillStyle = fib.ratio === 0.618 ? "rgba(124,58,237,0.08)" : "rgba(124,58,237,0.045)";
+        ctx.fillRect(chartLeft, y - 7, chartW, 14);
+      }
+      ctx.setLineDash(fib.extension ? [7, 5] : [5, 4]);
+      ctx.strokeStyle = fib.extension ? "rgba(14,165,233,0.82)" : "rgba(124,58,237,0.78)";
+      ctx.lineWidth = isKey ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, y);
+      ctx.lineTo(chartRight, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
+
+      const label = `${fibOverlay.source === "wave" ? "Wave" : "Range"} ${fib.label}`;
+      const price = formatPrice(fib.price);
+      ctx.font = `${isKey ? "700 " : ""}11px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      const labelW = ctx.measureText(label).width + 12;
+      const priceW = ctx.measureText(price).width + 12;
+      ctx.fillStyle = color;
+      drawRoundRect(chartLeft + 6, y - 10, labelW, 18, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(label, chartLeft + 12, y + 4);
+      ctx.fillStyle = color;
+      drawRoundRect(chartRight - priceW - 6, y - 10, priceW, 18, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(price, chartRight - priceW, y + 4);
+    });
+  }
 
   if (state.overlays.waves && analysis?.wave) {
     const firstDate = bars[0].date.getTime();
@@ -846,6 +895,7 @@ function wireEvents() {
     const key = button.dataset.toggle;
     state.overlays[key] = !state.overlays[key];
     button.classList.toggle("active", state.overlays[key]);
+    setStatus(`${button.textContent.trim()} ${state.overlays[key] ? "shown" : "hidden"}`);
     saveState();
     drawChart();
   });
