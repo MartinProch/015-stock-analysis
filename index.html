@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Analysis</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">WF</span>
+        <div>
+          <h1>Stock Analysis</h1>
+          <p>Elliott wave workspace</p>
+        </div>
+      </div>
+      <form id="tickerForm" class="ticker-form">
+        <input id="tickerInput" autocomplete="off" placeholder="SPY, AAPL, MSFT..." />
+        <button type="submit">Load</button>
+      </form>
+      <div id="statusLine" class="status-line">Ready</div>
+    </header>
+
+    <aside class="watchlist-panel">
+      <div class="panel-head">
+        <h2>Watchlist</h2>
+        <select id="sortSelect">
+          <option value="default">Default</option>
+          <option value="score">Wave score</option>
+          <option value="change">Change %</option>
+          <option value="rsi">RSI</option>
+        </select>
+      </div>
+      <div id="watchlist" class="watchlist"></div>
+    </aside>
+
+    <main class="chart-area">
+      <div class="chart-toolbar">
+        <div class="segment" id="timeframes">
+          <button data-range="3mo">3M</button>
+          <button data-range="6mo">6M</button>
+          <button data-range="1y">1Y</button>
+          <button data-range="2y" class="active">2Y</button>
+          <button data-range="5y">5Y</button>
+        </div>
+        <div class="segment" id="overlays">
+          <button data-toggle="waves" class="active">Waves</button>
+          <button data-toggle="fibs" class="active">Fibs</button>
+          <button data-toggle="sr" class="active">S/R</button>
+          <button data-toggle="zones" class="active">Zones</button>
+          <button data-toggle="volume" class="active">Volume</button>
+          <button data-toggle="divergence" class="active">RSI div</button>
+        </div>
+        <button id="resetZoomBtn" class="ghost">Reset zoom</button>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="priceCanvas"></canvas>
+        <div id="emptyState" class="empty-state">Load a ticker to start.</div>
+      </div>
+    </main>
+
+    <aside class="analysis-panel">
+      <nav class="tabs">
+        <button data-tab="waves" class="active">Waves</button>
+        <button data-tab="scanner">Scanner</button>
+        <button data-tab="risk">Risk</button>
+      </nav>
+      <section id="panelContent" class="panel-content"></section>
+    </aside>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
