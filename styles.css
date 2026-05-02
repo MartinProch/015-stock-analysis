@@ -495,9 +495,11 @@ button:focus-visible {
 .panel-content {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .card {
+  min-width: 0;
   border: 1px solid var(--border);
   background: var(--card);
   border-radius: var(--radius);
@@ -613,28 +615,30 @@ button:focus-visible {
 }
 
 .compare-metric-bar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   align-items: center;
   gap: 4px;
   margin: 8px 0 10px;
+  width: 100%;
   max-width: 100%;
   overflow: visible;
 }
 
 .compare-metric-bar button {
-  flex: 0 0 auto;
   min-width: 0;
   min-height: 0;
-  height: 18px;
-  padding: 0 5px;
+  height: 17px;
+  padding: 0 2px;
+  overflow: hidden;
   border-radius: 3px;
   box-shadow: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   letter-spacing: 0;
-  line-height: 18px;
+  line-height: 17px;
+  text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -722,6 +726,10 @@ button:focus-visible {
     max-height: 240px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .compare-metric-bar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .chart-area {
