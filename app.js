@@ -19,6 +19,7 @@ const state = {
   sort: "default",
   compareMetric: "rs3m",
   data: {},
+  dataCache: {},
   analysis: {},
   fundamentals: {},
   tab: "waves",
@@ -153,6 +154,13 @@ function normalizeSymbol(value) {
 }
 
 async function fetchTicker(symbol) {
+  const key = normalizeSymbol(symbol);
+  const cached = state.dataCache[key]?.[state.range];
+  if (cached) {
+    state.data[key] = cached;
+    state.analysis[key] = analyzeSymbol(cached.bars);
+    return cached;
+  }
   setStatus(`Loading ${symbol}...`);
   const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(state.range)}`, { cache: "no-store" });
   const payload = await response.json();
@@ -165,10 +173,11 @@ async function fetchTicker(symbol) {
     c: Number(bar.close),
     v: Number(bar.volume || 0),
   }));
-  state.data[symbol] = payload;
-  state.analysis[symbol] = analyzeSymbol(payload.bars);
-  fetchFundamentals(symbol).catch(() => null);
-  setStatus(`${symbol} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
+  state.data[key] = payload;
+  state.dataCache[key] = { ...(state.dataCache[key] || {}), [state.range]: payload };
+  state.analysis[key] = analyzeSymbol(payload.bars);
+  fetchFundamentals(key).catch(() => null);
+  setStatus(`${key} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
   return payload;
 }
 
@@ -476,7 +485,7 @@ function buildForecast(wave, bars) {
   const data = wave.waveData || {};
   if (wave.pattern === "Impulse" && data.p4 && data.w1) {
     const sign = wave.direction === "up" ? 1 : -1;
-    const base = data.p4.price;
+    const base = current;
     return {
       target618: base + sign * Math.abs(data.w1) * 0.618,
       target100: base + sign * Math.abs(data.w1),
@@ -486,8 +495,22 @@ function buildForecast(wave, bars) {
       buyHigh: wave.direction === "up" ? data.p4.price + Math.abs(data.w1) * 0.236 : current + Math.abs(data.w1) * 0.236,
     };
   }
+  if (wave.pivots?.length >= 2) {
+    const lastPivot = wave.pivots[wave.pivots.length - 1];
+    const prevPivot = wave.pivots[wave.pivots.length - 2];
+    const swing = Math.abs(lastPivot.price - prevPivot.price);
+    const sign = current >= lastPivot.price ? 1 : -1;
+    return {
+      target618: current + sign * swing * 0.618,
+      target100: current + sign * swing,
+      target1618: current + sign * swing * 1.618,
+      stop: prevPivot.price,
+      buyLow: Math.min(current, lastPivot.price),
+      buyHigh: Math.max(current, lastPivot.price),
+    };
+  }
   const fib618 = wave.fibLevels?.find((item) => item.ratio === 0.618)?.price;
-  return { target618: fib618, target100: wave.pivots?.at(-1)?.price, stop: wave.pivots?.[0]?.price };
+  return { target618: fib618, target100: current, target1618: wave.fibLevels?.find((item) => item.ratio === 1.618)?.price, stop: wave.pivots?.[0]?.price };
 }
 
 function analyzeSymbol(bars) {
@@ -1642,10 +1665,19 @@ function wireEvents() {
     state.range = button.dataset.range;
     state.zoom = null;
     refs.timeframes.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+    saveState();
     state.data = {};
     state.analysis = {};
-    saveState();
-    await Promise.all(state.tickers.map((symbol) => fetchTicker(symbol).catch(() => null)));
+    await fetchTicker(state.selected).catch(() => null);
+    renderAll();
+    Promise.all(
+      state.tickers
+        .filter((symbol) => symbol !== state.selected)
+        .map((symbol) => fetchTicker(symbol).catch(() => null))
+    ).then(() => {
+      renderWatchlist();
+      if (state.tab === "scanner" || state.tab === "rs" || state.tab === "compare") renderPanel();
+    });
     renderAll();
   });
   refs.overlays.addEventListener("click", (event) => {

@@ -349,6 +349,8 @@ Saved in browser `localStorage`:
 - Overlay states
 - Portfolio positions
 
+The app also keeps an in-memory per-symbol, per-range chart cache during the current session so switching between `3M`, `1Y`, `2Y`, and `5Y` feels much faster after the first load.
+
 Storage key:
 
 ```text
@@ -413,6 +415,12 @@ When making a bigger feature/design/data-source change, update this README in th
 
 - Replaced the broken Nasdaq intraday-only chart fallback with range-based Nasdaq historical daily data when Yahoo chart data is rate-limited.
 - Fixed the chart scale so forward Fibonacci extensions and measured-move targets remain visible.
+
+### 2026-05-02 — Faster Range Switching And Live Forecast Base
+
+- Added per-range chart caching in the frontend session so timeframe switching can reuse previously loaded data.
+- Changed timeframe clicks to update the selected ticker first and refresh the rest of the watchlist in the background.
+- Moved wave forecast targets to project from the current price instead of only from an older completed-wave anchor.
 
 ### 2026-05-02 — YTD, Tooltips, And Compare
 
