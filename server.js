@@ -241,22 +241,40 @@ function compactFundamentals(payload) {
   return clean;
 }
 
+async function tryNasdaqAssetClasses(assetClasses, callback) {
+  let lastError = null;
+  for (const assetClass of assetClasses) {
+    try {
+      return await callback(assetClass);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Nasdaq request failed.");
+}
+
 async function fetchNasdaqQuote(symbol) {
   const apiSymbol = symbol.replace(/^\^/, "");
   const headers = {
     "referer": "https://www.nasdaq.com/",
     "origin": "https://www.nasdaq.com",
   };
-  const [infoText, chartText] = await Promise.all([
-    httpsText(`https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/info?assetclass=stocks`, headers),
-    httpsText(`https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/chart?assetclass=stocks`, headers).catch(() => ""),
-  ]);
+  const { infoText, chartText, assetClass } = await tryNasdaqAssetClasses(["stocks", "etf"], async (candidate) => {
+    const [nextInfoText, nextChartText] = await Promise.all([
+      httpsText(`https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/info?assetclass=${candidate}`, headers),
+      httpsText(`https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/chart?assetclass=${candidate}`, headers).catch(() => ""),
+    ]);
+    const probe = JSON.parse(nextInfoText)?.data || {};
+    const probePrice = parsePriceText(probe.primaryData?.lastSalePrice);
+    if (!Number.isFinite(probePrice) || probePrice <= 0) throw new Error(`Nasdaq ${candidate} quote has no valid price.`);
+    return { infoText: nextInfoText, chartText: nextChartText, assetClass: candidate };
+  });
   const info = JSON.parse(infoText);
   const chart = chartText ? JSON.parse(chartText) : {};
   const data = info?.data || {};
   const chartData = chart?.data || {};
   const latestClose = parsePriceText(data.primaryData?.lastSalePrice || chartData.lastSalePrice);
-  if (!Number.isFinite(latestClose)) throw new Error("Nasdaq response has no latest price.");
+  if (!Number.isFinite(latestClose) || latestClose <= 0) throw new Error("Nasdaq response has no latest price.");
   const change = parsePriceText(data.primaryData?.netChange || chartData.netChange);
   const changePctRaw = parsePriceText(data.primaryData?.percentageChange || chartData.percentageChange);
   const volume = parsePriceText(data.primaryData?.volume || chartData.volume);
@@ -304,6 +322,7 @@ async function fetchNasdaqQuote(symbol) {
     changePct: Number.isFinite(changePctRaw) ? changePctRaw : 0,
     bars,
     delayed: data.primaryData?.isRealTime === false || true,
+    assetClass,
   };
 }
 
@@ -315,14 +334,23 @@ async function fetchNasdaqHistorical(symbol, range = "2y") {
   };
   const fromdate = formatNasdaqDate(rangeStartDate(range));
   const todate = formatNasdaqDate(new Date());
+  const { first, assetClass } = await tryNasdaqAssetClasses(["stocks", "etf"], async (candidate) => {
+    const text = await httpsText(
+      `https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/historical?assetclass=${candidate}&fromdate=${encodeURIComponent(fromdate)}&todate=${encodeURIComponent(todate)}&offset=0`,
+      headers
+    );
+    const data = JSON.parse(text)?.data || {};
+    const rows = parseNasdaqHistoricalRows(data?.tradesTable?.rows);
+    if (!rows.length) throw new Error(`Nasdaq ${candidate} historical has no rows.`);
+    return { first: data, assetClass: candidate };
+  });
   const fetchPage = async (offset) => {
     const text = await httpsText(
-      `https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/historical?assetclass=stocks&fromdate=${encodeURIComponent(fromdate)}&todate=${encodeURIComponent(todate)}&offset=${offset}`,
+      `https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/historical?assetclass=${assetClass}&fromdate=${encodeURIComponent(fromdate)}&todate=${encodeURIComponent(todate)}&offset=${offset}`,
       headers
     );
     return JSON.parse(text)?.data || {};
   };
-  const first = await fetchPage(0);
   const firstRows = parseNasdaqHistoricalRows(first?.tradesTable?.rows);
   const total = Number(first?.totalRecords) || firstRows.length;
   const pageSize = Math.max(1, firstRows.length);
@@ -346,6 +374,7 @@ async function fetchNasdaqHistorical(symbol, range = "2y") {
     changePct: prev.close ? ((last.close - prev.close) / prev.close) * 100 : 0,
     bars: rows,
     delayed: true,
+    assetClass,
   };
 }
 
