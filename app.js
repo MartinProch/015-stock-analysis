@@ -17,6 +17,7 @@ const state = {
   selected: "SPY",
   range: "2y",
   sort: "default",
+  compareMetric: "rs3m",
   data: {},
   analysis: {},
   tab: "waves",
@@ -64,6 +65,7 @@ function saveState() {
       selected: state.selected,
       range: state.range,
       sort: state.sort,
+      compareMetric: state.compareMetric,
       overlays: state.overlays,
       positions: state.positions,
     })
@@ -77,6 +79,7 @@ function loadState() {
     if (saved.selected) state.selected = saved.selected;
     if (saved.range) state.range = saved.range;
     if (saved.sort) state.sort = saved.sort;
+    if (saved.compareMetric) state.compareMetric = saved.compareMetric;
     if (saved.overlays) state.overlays = { ...state.overlays, ...saved.overlays };
     if (Array.isArray(saved.positions)) state.positions = saved.positions;
   } catch {
@@ -584,6 +587,62 @@ function computeReturn(bars, lookback) {
   return ((end - start) / start) * 100;
 }
 
+const COMPARE_METRICS = [
+  { key: "rs3m", label: "RS 3M", higherBetter: true, format: (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(1)} pts` : "-" },
+  { key: "return3m", label: "3M %", higherBetter: true, format: formatPct },
+  { key: "return1m", label: "1M %", higherBetter: true, format: formatPct },
+  { key: "changePct", label: "1D %", higherBetter: true, format: formatPct },
+  { key: "waveScore", label: "Wave", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(0) : "-" },
+  { key: "rsi", label: "RSI", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(1) : "-" },
+  { key: "supportGap", label: "To Support", higherBetter: false, format: formatPct },
+  { key: "resistanceGap", label: "To Resist.", higherBetter: true, format: formatPct },
+];
+
+function getNearestLevels(analysis, current) {
+  const levels = Array.isArray(analysis?.sr) ? analysis.sr : [];
+  const supports = levels.filter((level) => level.price < current).sort((a, b) => b.price - a.price);
+  const resistances = levels.filter((level) => level.price >= current).sort((a, b) => a.price - b.price);
+  return {
+    support: supports[0] || null,
+    resistance: resistances[0] || null,
+  };
+}
+
+function buildCompareRows() {
+  const spyBars = state.data.SPY?.bars || [];
+  const spy3m = computeReturn(spyBars, 63);
+  return state.tickers.map((symbol) => {
+    const data = state.data[symbol] || null;
+    const analysis = state.analysis[symbol] || null;
+    const bars = data?.bars || [];
+    const current = Number(data?.latestClose);
+    const levels = getNearestLevels(analysis, current);
+    const return1m = computeReturn(bars, 21);
+    const return3m = computeReturn(bars, 63);
+    const supportGap = levels.support && Number.isFinite(current) ? ((current - levels.support.price) / current) * 100 : NaN;
+    const resistanceGap = levels.resistance && Number.isFinite(current) ? ((levels.resistance.price - current) / current) * 100 : NaN;
+    return {
+      symbol,
+      price: current,
+      changePct: Number(data?.changePct),
+      waveScore: Number(analysis?.confidence),
+      wave: analysis?.wave ? `${analysis.wave.pattern} ${analysis.wave.currentWave}` : "No count",
+      rsi: Number(analysis?.latestRsi),
+      return1m,
+      return3m,
+      rs3m: Number.isFinite(return3m) && Number.isFinite(spy3m) ? return3m - spy3m : NaN,
+      supportGap,
+      resistanceGap,
+      source: data?.source || "",
+    };
+  });
+}
+
+function compareSortValue(row, metric) {
+  const value = Number(row?.[metric?.key]);
+  return Number.isFinite(value) ? value : (metric?.higherBetter ? -Infinity : Infinity);
+}
+
 function renderPanel() {
   const data = state.data[state.selected];
   const analysis = state.analysis[state.selected];
@@ -664,6 +723,64 @@ function renderPanel() {
               </div>
             `;
           }).join("")}
+        </div>
+      </div>
+    `;
+    return;
+  }
+  if (state.tab === "compare") {
+    const activeMetric = COMPARE_METRICS.find((metric) => metric.key === state.compareMetric) || COMPARE_METRICS[0];
+    const rows = buildCompareRows().sort((left, right) => {
+      const diff = compareSortValue(right, activeMetric) - compareSortValue(left, activeMetric);
+      return activeMetric.higherBetter ? diff : -diff;
+    });
+    refs.panel.innerHTML = `
+      <div class="card">
+        <h3>Compare watchlist</h3>
+        <p class="small">Sort the watchlist by locally available technical and performance metrics. Click any ticker row to load it.</p>
+        <div class="compare-metric-bar">
+          ${COMPARE_METRICS.map((metric) => `
+            <button type="button" class="${metric.key === activeMetric.key ? "active" : ""}" data-compare-metric="${metric.key}">
+              ${escapeHtml(metric.label)}
+            </button>
+          `).join("")}
+        </div>
+        <div class="compare-table-wrap">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>${escapeHtml(activeMetric.label)}</th>
+                <th>Price</th>
+                <th>1D</th>
+                <th>Wave</th>
+                <th>RSI</th>
+                <th>1M</th>
+                <th>3M</th>
+                <th>Support</th>
+                <th>Resist.</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((row) => {
+                const activeValue = activeMetric.format(row[activeMetric.key]);
+                return `
+                  <tr data-symbol="${escapeHtml(row.symbol)}">
+                    <td><strong>${escapeHtml(row.symbol)}</strong></td>
+                    <td class="${Number(row[activeMetric.key]) >= 0 ? "up" : "down"}">${escapeHtml(activeValue)}</td>
+                    <td>${formatPrice(row.price)}</td>
+                    <td class="${row.changePct >= 0 ? "up" : "down"}">${formatPct(row.changePct)}</td>
+                    <td>${escapeHtml(row.wave)}</td>
+                    <td>${Number.isFinite(row.rsi) ? row.rsi.toFixed(1) : "-"}</td>
+                    <td class="${row.return1m >= 0 ? "up" : "down"}">${formatPct(row.return1m)}</td>
+                    <td class="${row.return3m >= 0 ? "up" : "down"}">${formatPct(row.return3m)}</td>
+                    <td>${Number.isFinite(row.supportGap) ? formatPct(-row.supportGap) : "-"}</td>
+                    <td>${Number.isFinite(row.resistanceGap) ? formatPct(row.resistanceGap) : "-"}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
         </div>
       </div>
     `;
@@ -1222,6 +1339,12 @@ function stepTimeframe(direction) {
   next?.click();
 }
 
+function hydrateTooltips() {
+  document.querySelectorAll("[data-tip]").forEach((element) => {
+    element.dataset.tip = String(element.dataset.tip || "").replace(/\|/g, "\n");
+  });
+}
+
 function wireEvents() {
   refs.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1261,6 +1384,18 @@ function wireEvents() {
     renderPanel();
   });
   refs.panel.addEventListener("click", (event) => {
+    const metricButton = event.target.closest("[data-compare-metric]");
+    if (metricButton) {
+      state.compareMetric = metricButton.dataset.compareMetric;
+      saveState();
+      renderPanel();
+      return;
+    }
+    const compareRow = event.target.closest(".compare-table tr[data-symbol]");
+    if (compareRow) {
+      selectSymbol(compareRow.dataset.symbol).catch((error) => setStatus(error.message));
+      return;
+    }
     const scannerItem = event.target.closest(".scanner-item[data-symbol]");
     if (scannerItem) {
       selectSymbol(scannerItem.dataset.symbol).catch((error) => setStatus(error.message));
@@ -1422,6 +1557,7 @@ function wireEvents() {
 
 async function init() {
   loadState();
+  hydrateTooltips();
   refs.sort.value = state.sort;
   refs.timeframes.querySelectorAll("button").forEach((button) => button.classList.toggle("active", button.dataset.range === state.range));
   refs.overlays.querySelectorAll("button").forEach((button) => button.classList.toggle("active", !!state.overlays[button.dataset.toggle]));

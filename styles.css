@@ -393,6 +393,52 @@ button:focus-visible {
   padding: 0 10px;
 }
 
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::before,
+[data-tip]::after {
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, 6px);
+  transition: opacity 0.15s ease 0.65s, transform 0.15s ease 0.65s;
+  z-index: 30;
+}
+
+[data-tip]::before {
+  content: "";
+  bottom: -9px;
+  border: 6px solid transparent;
+  border-bottom-color: #0f172a;
+}
+
+[data-tip]::after {
+  content: attr(data-tip);
+  bottom: -86px;
+  width: 260px;
+  max-width: min(260px, 80vw);
+  white-space: pre-line;
+  border-radius: var(--radius);
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: var(--shadow-md);
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+[data-tip]:hover::before,
+[data-tip]:hover::after,
+[data-tip]:focus-visible::before,
+[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .canvas-wrap {
   position: relative;
   flex: 1;
@@ -564,6 +610,55 @@ button:focus-visible {
 .portfolio-row button {
   min-height: 28px;
   padding: 0 8px;
+}
+
+.compare-metric-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.compare-metric-bar button {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.compare-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+  font-size: 12px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.compare-table th {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-weight: 700;
+}
+
+.compare-table tr {
+  cursor: pointer;
+}
+
+.compare-table tbody tr:hover {
+  background: #fbfdff;
 }
 
 @media (max-width: 1120px) {

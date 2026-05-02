@@ -96,11 +96,14 @@ Available ranges:
 - `1M`
 - `3M`
 - `6M`
+- `YTD`
 - `1Y`
 - `2Y`
 - `5Y`
 
 Changing timeframe reloads watchlist data for that range.
+
+Hovering on a timeframe button for a moment shows what that range is useful for.
 
 ## Technical Analysis
 
@@ -197,6 +200,10 @@ The `Candles` overlay labels recent simple candle patterns:
 
 This is a compact implementation, not the full 14-pattern engine from `014-wavefront`.
 
+### Toggle Tooltips
+
+Timeframe and overlay controls include delayed hover tooltips. Each tooltip explains what the toggle draws and when it is useful, mirroring the guidance-heavy toolbar style from `014-wavefront`.
+
 ## Right Panel Tabs
 
 ### Waves
@@ -243,6 +250,24 @@ It calculates:
 - 1-month return
 - 3-month return
 - 3-month relative strength spread versus SPY
+
+### Compare
+
+Side-by-side watchlist comparison inspired by the Wavefront Compare tab.
+
+It currently compares locally available technical/performance metrics:
+
+- RS 3M versus SPY
+- 3-month return
+- 1-month return
+- 1-day change
+- Wave score
+- RSI
+- Distance to nearest support
+- Distance to nearest resistance
+- Wave state
+
+Metric pills at the top sort the table. Clicking a ticker row loads that ticker.
 
 ### Portfolio
 
@@ -334,6 +359,12 @@ When making a bigger feature/design/data-source change, update this README in th
 - Added Nasdaq quote/chart fallback when Yahoo is blocked or rate-limited.
 - Updated frontend status text to show the data source and fallback state.
 - Verified `NVDA` no longer shows the generated fake sample price.
+
+### 2026-05-02 — YTD, Tooltips, And Compare
+
+- Added `YTD` to the timeframe controls.
+- Added delayed hover explanations to timeframe and overlay toggles.
+- Added a Compare tab with sortable watchlist metrics inspired by `014-wavefront`.
 
 ### 2026-05-02 — Wavefront Feature Pass
 
