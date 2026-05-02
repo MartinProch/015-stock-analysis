@@ -198,6 +198,13 @@ button:focus-visible {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+#mobileModeBtn.active {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  box-shadow: none;
+}
+
 .watchlist-panel,
 .analysis-panel {
   min-height: 0;
@@ -213,6 +220,117 @@ button:focus-visible {
 .analysis-panel {
   border-left: 1px solid var(--border);
   padding: 14px;
+}
+
+body.mobile-mode {
+  overflow: auto;
+  background: var(--background);
+}
+
+body.mobile-mode .app-shell {
+  width: min(420px, 100vw);
+  margin: 0 auto;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto auto;
+  min-height: 100vh;
+  height: auto;
+  background: var(--background);
+}
+
+body.mobile-mode .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  padding: 12px;
+  gap: 10px;
+}
+
+body.mobile-mode .brand {
+  min-width: 0;
+  flex: 1 1 180px;
+}
+
+body.mobile-mode .ticker-form {
+  order: 3;
+  width: 100%;
+}
+
+body.mobile-mode .ticker-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+body.mobile-mode #mobileModeBtn {
+  min-width: 76px;
+}
+
+body.mobile-mode .status-line {
+  order: 4;
+  width: 100%;
+  margin-left: 0;
+  max-width: none;
+}
+
+body.mobile-mode .watchlist-panel,
+body.mobile-mode .chart-area,
+body.mobile-mode .analysis-panel {
+  min-height: 0;
+  overflow: visible;
+}
+
+body.mobile-mode .watchlist-panel,
+body.mobile-mode .analysis-panel {
+  border: 0;
+  background: transparent;
+  padding: 12px;
+}
+
+body.mobile-mode .chart-area {
+  padding: 0 12px 12px;
+}
+
+body.mobile-mode .chart-card {
+  min-height: 620px;
+}
+
+body.mobile-mode .chart-card-head {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+body.mobile-mode .chart-actions,
+body.mobile-mode .chart-toolbar {
+  align-items: stretch;
+}
+
+body.mobile-mode .chart-actions {
+  flex-direction: column;
+}
+
+body.mobile-mode .segment {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+body.mobile-mode #timeframes.segment button {
+  flex: 1 0 calc(25% - 2px);
+  min-width: 0;
+}
+
+body.mobile-mode .segment.overlays button {
+  flex: 1 0 calc(33.333% - 2px);
+  min-width: 0;
+  padding: 0 6px;
+}
+
+body.mobile-mode .tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.mobile-mode .compare-metric-bar button {
+  flex: 1 0 calc(33.333% - 6px);
 }
 
 .panel-head {

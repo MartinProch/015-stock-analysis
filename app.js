@@ -23,6 +23,7 @@ const state = {
   analysis: {},
   fundamentals: {},
   tab: "waves",
+  mobileMode: false,
   overlays: {
     waves: true,
     fibs: true,
@@ -49,6 +50,7 @@ const refs = {
   watchlist: document.getElementById("watchlist"),
   sort: document.getElementById("sortSelect"),
   status: document.getElementById("statusLine"),
+  mobileModeBtn: document.getElementById("mobileModeBtn"),
   timeframes: document.getElementById("timeframes"),
   overlays: document.getElementById("overlays"),
   canvas: document.getElementById("priceCanvas"),
@@ -77,6 +79,7 @@ function saveState() {
       range: state.range,
       sort: state.sort,
       compareMetric: state.compareMetric,
+      mobileMode: state.mobileMode,
       overlays: state.overlays,
       positions: state.positions,
     })
@@ -91,6 +94,7 @@ function loadState() {
     if (saved.range) state.range = saved.range;
     if (saved.sort) state.sort = saved.sort;
     if (saved.compareMetric) state.compareMetric = saved.compareMetric;
+    if (typeof saved.mobileMode === "boolean") state.mobileMode = saved.mobileMode;
     if (saved.overlays) state.overlays = { ...state.overlays, ...saved.overlays };
     if (Array.isArray(saved.positions)) state.positions = saved.positions;
   } catch {
@@ -247,6 +251,20 @@ function formatCompactNumber(value) {
 
 function setStatus(text) {
   refs.status.textContent = text;
+}
+
+function syncMobileModeUi() {
+  document.body.classList.toggle("mobile-mode", !!state.mobileMode);
+  refs.mobileModeBtn?.classList.toggle("active", !!state.mobileMode);
+  refs.mobileModeBtn.textContent = state.mobileMode ? "Desktop" : "Mobile";
+}
+
+function setMobileMode(force = null) {
+  state.mobileMode = force == null ? !state.mobileMode : !!force;
+  syncMobileModeUi();
+  saveState();
+  resizeCanvas();
+  setStatus(state.mobileMode ? "Mobile mode enabled" : "Desktop mode enabled");
 }
 
 function normalizeSymbol(value) {
@@ -2016,6 +2034,9 @@ function wireEvents() {
     saveState();
     renderWatchlist();
   });
+  refs.mobileModeBtn?.addEventListener("click", () => {
+    setMobileMode();
+  });
   refs.timeframes.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-range]");
     if (!button) return;
@@ -2227,6 +2248,7 @@ function wireEvents() {
 
 async function init() {
   loadState();
+  syncMobileModeUi();
   hydrateTooltips();
   wireTooltips();
   refs.sort.value = state.sort;

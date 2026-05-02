@@ -105,6 +105,14 @@ Changing timeframe reloads watchlist data for that range.
 
 Hovering on a timeframe button for a moment shows what that range is useful for.
 
+### Mobile Mode
+
+The top bar now includes a `Mobile` toggle.
+
+- It switches the app into a phone-style stacked layout.
+- The mode is useful for checking how the workspace behaves as a compact mobile app.
+- The preference is saved in local storage and can be toggled back to desktop mode at any time.
+
 ## Technical Analysis
 
 ### Elliott Wave Detection
