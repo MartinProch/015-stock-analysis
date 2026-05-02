@@ -60,6 +60,7 @@ const refs = {
 const ctx = refs.canvas.getContext("2d");
 let panStart = null;
 const fundamentalsLoading = new Set();
+const pendingTickerFetches = new Map();
 const tooltipState = {
   target: null,
   text: "",
@@ -118,6 +119,10 @@ function formatPct(value) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function formatUnsignedPct(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
@@ -161,24 +166,34 @@ async function fetchTicker(symbol) {
     state.analysis[key] = analyzeSymbol(cached.bars);
     return cached;
   }
+  const requestKey = `${key}:${state.range}`;
+  if (pendingTickerFetches.has(requestKey)) return pendingTickerFetches.get(requestKey);
   setStatus(`Loading ${symbol}...`);
-  const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(state.range)}`, { cache: "no-store" });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
-  payload.bars = payload.bars.map((bar) => ({
-    date: new Date(String(bar.date || "").includes("T") ? bar.date : `${bar.date}T00:00:00`),
-    o: Number(bar.open),
-    h: Number(bar.high),
-    l: Number(bar.low),
-    c: Number(bar.close),
-    v: Number(bar.volume || 0),
-  }));
-  state.data[key] = payload;
-  state.dataCache[key] = { ...(state.dataCache[key] || {}), [state.range]: payload };
-  state.analysis[key] = analyzeSymbol(payload.bars);
-  fetchFundamentals(key).catch(() => null);
-  setStatus(`${key} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
-  return payload;
+  const task = (async () => {
+    const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(state.range)}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+    payload.bars = payload.bars.map((bar) => ({
+      date: new Date(String(bar.date || "").includes("T") ? bar.date : `${bar.date}T00:00:00`),
+      o: Number(bar.open),
+      h: Number(bar.high),
+      l: Number(bar.low),
+      c: Number(bar.close),
+      v: Number(bar.volume || 0),
+    }));
+    state.data[key] = payload;
+    state.dataCache[key] = { ...(state.dataCache[key] || {}), [state.range]: payload };
+    state.analysis[key] = analyzeSymbol(payload.bars);
+    fetchFundamentals(key).catch(() => null);
+    setStatus(`${key} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
+    return payload;
+  })();
+  pendingTickerFetches.set(requestKey, task);
+  try {
+    return await task;
+  } finally {
+    pendingTickerFetches.delete(requestKey);
+  }
 }
 
 async function fetchFundamentals(symbol, force = false) {
@@ -511,6 +526,56 @@ function buildForecast(wave, bars) {
   }
   const fib618 = wave.fibLevels?.find((item) => item.ratio === 0.618)?.price;
   return { target618: fib618, target100: current, target1618: wave.fibLevels?.find((item) => item.ratio === 1.618)?.price, stop: wave.pivots?.[0]?.price };
+}
+
+function buildForecastPath(wave, forecast, bars) {
+  const current = bars[bars.length - 1]?.c;
+  if (!wave || !forecast || !Number.isFinite(current)) return null;
+  const points = [{ offset: 0, price: current, label: "Now" }];
+  const directionSign = wave.direction === "down" ? -1 : 1;
+  if (wave.pattern === "Impulse") {
+    const data = wave.waveData || {};
+    const targetV = Number.isFinite(forecast.target100) ? forecast.target100 : forecast.target618;
+    const waveSpan = Math.max(
+      Math.abs(Number(data.w1) || 0),
+      Math.abs(current - Number(forecast.stop) || current),
+      Math.abs(Number(forecast.target1618) - current || 0),
+      Math.max(1, Math.abs(current) * 0.03)
+    );
+    if (Number.isFinite(targetV)) points.push({ offset: 6, price: targetV, label: "V" });
+    points.push({
+      offset: 11,
+      price: Number.isFinite(forecast.stop)
+        ? current + (forecast.stop - current) * 0.62
+        : current - directionSign * waveSpan * 0.382,
+      label: "A",
+    });
+    points.push({
+      offset: 15,
+      price: Number.isFinite(targetV)
+        ? targetV - directionSign * waveSpan * 0.236
+        : current + directionSign * waveSpan * 0.18,
+      label: "B",
+    });
+    points.push({
+      offset: 22,
+      price: Number.isFinite(forecast.stop)
+        ? forecast.stop
+        : current - directionSign * waveSpan * 0.618,
+      label: "C",
+    });
+  } else {
+    const lowTarget = Number.isFinite(forecast.target618) ? forecast.target618 : current + directionSign * Math.abs(current) * 0.05;
+    const highTarget = Number.isFinite(forecast.target1618) ? forecast.target1618 : current + directionSign * Math.abs(current) * 0.1;
+    points.push({ offset: 5, price: lowTarget, label: "I" });
+    points.push({
+      offset: 9,
+      price: current + (lowTarget - current) * 0.5,
+      label: "II",
+    });
+    points.push({ offset: 16, price: highTarget, label: "III" });
+  }
+  return points.filter((point) => Number.isFinite(point.price));
 }
 
 function analyzeSymbol(bars) {
@@ -1112,6 +1177,7 @@ function drawChart() {
   const chartH = Math.max(40, chartBottom - chartTop);
   const fibOverlay = state.overlays.fibs ? getVisibleFibOverlay(bars, analysis) : null;
   const measuredMove = state.overlays.measured ? measuredMoveTargets(analysis?.wave, bars) : null;
+  const forecastPath = buildForecastPath(analysis?.wave, analysis?.forecast, bars);
   const minCandidates = bars.map((bar) => bar.l);
   const maxCandidates = bars.map((bar) => bar.h);
   if (fibOverlay?.levels?.length) {
@@ -1139,13 +1205,37 @@ function drawChart() {
       }
     });
   }
+  if (forecastPath?.length) {
+    forecastPath.forEach((point) => {
+      minCandidates.push(point.price);
+      maxCandidates.push(point.price);
+    });
+  }
   const min = Math.min(...minCandidates);
   const max = Math.max(...maxCandidates);
   const span = max - min || 1;
   const minP = Math.max(0, min - span * 0.08);
   const maxP = max + span * 0.12;
-  const px = (index) => chartLeft + (index / Math.max(1, bars.length - 1)) * chartW;
+  const futureSlots = forecastPath?.length ? forecastPath[forecastPath.length - 1].offset : 0;
+  const totalSlots = Math.max(1, bars.length - 1 + futureSlots);
+  const px = (index) => chartLeft + (index / totalSlots) * chartW;
   const py = (price) => chartBottom - ((price - minP) / (maxP - minP)) * chartH;
+
+  if (futureSlots > 0) {
+    const futureLeft = px(bars.length - 1);
+    ctx.fillStyle = "rgba(79,70,229,0.035)";
+    ctx.fillRect(futureLeft, chartTop, chartRight - futureLeft, chartH);
+    ctx.strokeStyle = "rgba(79,70,229,0.18)";
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(futureLeft, chartTop);
+    ctx.lineTo(futureLeft, chartBottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#7c3aed";
+    ctx.font = "700 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText("Forecast", futureLeft + 6, chartTop + 12);
+  }
 
   ctx.strokeStyle = "rgba(126,141,160,0.16)";
   ctx.lineWidth = 1;
@@ -1234,6 +1324,31 @@ function drawChart() {
       const y = py(price);
       if (y < chartTop || y > chartBottom) return;
       drawForecastLine(chartLeft, chartRight, y, line.color, `${line.label} ${formatPrice(price)}`);
+    });
+  }
+
+  if (forecastPath?.length >= 2) {
+    ctx.strokeStyle = "rgba(79,70,229,0.95)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    forecastPath.forEach((point, index) => {
+      const x = px(bars.length - 1 + point.offset);
+      const y = py(point.price);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    forecastPath.forEach((point, index) => {
+      const x = px(bars.length - 1 + point.offset);
+      const y = py(point.price);
+      ctx.fillStyle = index === 0 ? "#4f8cff" : "#7c3aed";
+      ctx.beginPath();
+      ctx.arc(x, y, index === 0 ? 4 : 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "700 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillText(point.label, x + 6, clamp(y - 8, chartTop + 10, chartBottom - 8));
     });
   }
 
@@ -1711,16 +1826,19 @@ function wireEvents() {
     saveState();
     state.data = {};
     state.analysis = {};
+    renderAll();
     await fetchTicker(state.selected).catch(() => null);
     renderAll();
-    Promise.all(
-      state.tickers
-        .filter((symbol) => symbol !== state.selected)
-        .map((symbol) => fetchTicker(symbol).catch(() => null))
-    ).then(() => {
-      renderWatchlist();
-      if (state.tab === "scanner" || state.tab === "rs" || state.tab === "compare") renderPanel();
-    });
+    state.tickers
+      .filter((symbol) => symbol !== state.selected)
+      .forEach((symbol) => {
+        fetchTicker(symbol)
+          .catch(() => null)
+          .finally(() => {
+            renderWatchlist();
+            if (state.tab === "scanner" || state.tab === "rs" || state.tab === "compare") renderPanel();
+          });
+      });
     renderAll();
   });
   refs.overlays.addEventListener("click", (event) => {
@@ -1917,10 +2035,24 @@ async function init() {
   wireEvents();
   resizeCanvas();
   renderWatchlist();
-  await Promise.all(state.tickers.map((symbol) => fetchTicker(symbol).catch((error) => {
-    console.warn(error);
-    return null;
-  })));
+  const initialSelected = state.tickers.includes(state.selected) ? state.selected : state.tickers[0];
+  if (initialSelected) {
+    await fetchTicker(initialSelected).catch((error) => {
+      console.warn(error);
+      return null;
+    });
+    renderAll();
+    state.tickers
+      .filter((symbol) => symbol !== initialSelected)
+      .forEach((symbol) => {
+        fetchTicker(symbol)
+          .catch((error) => {
+            console.warn(error);
+            return null;
+          })
+          .finally(() => renderWatchlist());
+      });
+  }
   if (!state.tickers.includes(state.selected)) state.selected = state.tickers[0];
   renderAll();
 }

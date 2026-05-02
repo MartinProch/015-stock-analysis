@@ -161,6 +161,27 @@ The chart can draw:
 
 These lines are projected from the current move logic already used in the Waves panel, and the chart scale expands to keep them visible when they sit above or below the recent price range.
 
+### Forward Elliott Projection
+
+The chart now extends past the latest real candle into a forecast area.
+
+- For an impulse structure, the app projects the probable completion of wave `V` and then an `A-B-C` corrective path.
+- For a correction structure, the app projects a simple `I-II-III` continuation path from the current point.
+- The projected path is intentionally heuristic. It is there to keep the wave story visually continuous, not to claim a precise future price path.
+
+The future zone is shaded and separated from historical bars so it is clear where real data ends and theory-based projection begins.
+
+## Performance Notes
+
+Recent loading improvements:
+
+- The server now caches chart responses per `symbol + range` for a short window.
+- In-flight chart requests are deduplicated, so repeated clicks do not spawn duplicate upstream fetches.
+- On startup and timeframe changes, the selected ticker loads first and renders immediately.
+- The rest of the watchlist hydrates in the background instead of blocking the main chart.
+
+This keeps the central chart responsive even when market data providers are slower than we would like.
+
 ### RSI Divergence
 
 RSI is calculated with a 14-period series. The app scans recent peaks/troughs for:

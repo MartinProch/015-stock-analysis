@@ -16,7 +16,10 @@ const MIME = {
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 const FUNDAMENTALS_TTL_MS = 12 * 60 * 60 * 1000;
+const CHART_TTL_MS = 5 * 60 * 1000;
 const fundamentalsCache = new Map();
+const chartCache = new Map();
+const chartInflight = new Map();
 
 function send(res, status, body, type = "text/plain; charset=utf-8") {
   res.writeHead(status, {
@@ -379,18 +382,36 @@ async function fetchNasdaqHistorical(symbol, range = "2y") {
 }
 
 async function fetchChart(symbol, range = "2y") {
+  const key = `${normalizeSymbol(symbol)}:${range}`;
+  const cached = chartCache.get(key);
+  if (cached && Date.now() - cached.time < CHART_TTL_MS) {
+    return cached.payload;
+  }
+  if (chartInflight.has(key)) return chartInflight.get(key);
+  const task = (async () => {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=1d`;
-  try {
-    return parseYahoo(await httpsJson(url), symbol);
-  } catch (error) {
-    const historical = await fetchNasdaqHistorical(symbol, range).catch(() => null);
-    if (historical) {
-      historical.warning = `Yahoo chart failed (${error.message}); showing Nasdaq historical data instead.`;
-      return historical;
+    try {
+      const payload = parseYahoo(await httpsJson(url), symbol);
+      chartCache.set(key, { time: Date.now(), payload });
+      return payload;
+    } catch (error) {
+      const historical = await fetchNasdaqHistorical(symbol, range).catch(() => null);
+      if (historical) {
+        historical.warning = `Yahoo chart failed (${error.message}); showing Nasdaq historical data instead.`;
+        chartCache.set(key, { time: Date.now(), payload: historical });
+        return historical;
+      }
+      const quote = await fetchNasdaqQuote(symbol);
+      quote.warning = `Yahoo chart failed (${error.message}); showing Nasdaq intraday quote data instead.`;
+      chartCache.set(key, { time: Date.now(), payload: quote });
+      return quote;
     }
-    const quote = await fetchNasdaqQuote(symbol);
-    quote.warning = `Yahoo chart failed (${error.message}); showing Nasdaq intraday quote data instead.`;
-    return quote;
+  })();
+  chartInflight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    chartInflight.delete(key);
   }
 }
 
