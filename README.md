@@ -166,7 +166,8 @@ These lines are projected from the current move logic already used in the Waves 
 The chart now extends past the latest real candle into a forecast area.
 
 - For an impulse structure, the app projects the probable completion of wave `V` and then an `A-B-C` corrective path.
-- For a correction structure, the app projects a simple `I-II-III` continuation path from the current point.
+- After the projected correction, the chart now continues into a next-cycle `1-2-3-4-5` path so the user can see a longer Elliott-style target map instead of only the immediate move.
+- For a correction structure, the chart projects `A-B-C` first and then the next `1-2-3-4-5` continuation sequence.
 - The projected path is intentionally heuristic. It is there to keep the wave story visually continuous, not to claim a precise future price path.
 
 The future zone is shaded and separated from historical bars so it is clear where real data ends and theory-based projection begins.
@@ -177,6 +178,7 @@ Recent loading improvements:
 
 - The server now caches chart responses per `symbol + range` for a short window.
 - In-flight chart requests are deduplicated, so repeated clicks do not spawn duplicate upstream fetches.
+- The client now keeps a 5-year master history per ticker and derives `1W / 1M / 3M / 6M / YTD / 1Y / 2Y` locally from that cached series, much closer to how `014-wavefront` behaves.
 - On startup and timeframe changes, the selected ticker loads first and renders immediately.
 - The rest of the watchlist hydrates in the background instead of blocking the main chart.
 

@@ -123,6 +123,75 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function clientRangeStartDate(range) {
+  const now = new Date();
+  const start = new Date(now);
+  if (range === "5d") start.setDate(start.getDate() - 7);
+  else if (range === "1mo") start.setMonth(start.getMonth() - 1);
+  else if (range === "3mo") start.setMonth(start.getMonth() - 3);
+  else if (range === "6mo") start.setMonth(start.getMonth() - 6);
+  else if (range === "ytd") return new Date(now.getFullYear(), 0, 1);
+  else if (range === "1y") start.setFullYear(start.getFullYear() - 1);
+  else if (range === "2y") start.setFullYear(start.getFullYear() - 2);
+  else if (range === "5y") start.setFullYear(start.getFullYear() - 5);
+  else start.setFullYear(start.getFullYear() - 2);
+  return start;
+}
+
+function filterBarsForRange(bars, range) {
+  if (!Array.isArray(bars) || !bars.length || range === "5y") return Array.isArray(bars) ? bars : [];
+  const start = clientRangeStartDate(range).getTime();
+  const filtered = bars.filter((bar) => bar.date.getTime() >= start);
+  if (filtered.length) return filtered;
+  if (range === "5d") return bars.slice(-5);
+  if (range === "1mo") return bars.slice(-21);
+  if (range === "3mo") return bars.slice(-63);
+  if (range === "6mo") return bars.slice(-126);
+  if (range === "1y") return bars.slice(-252);
+  if (range === "2y") return bars.slice(-504);
+  return bars;
+}
+
+function derivePayloadForRange(payload, range) {
+  if (!payload?.bars?.length) return null;
+  const bars = filterBarsForRange(payload.bars, range);
+  if (!bars.length) return null;
+  const latest = bars[bars.length - 1];
+  const prev = bars[bars.length - 2] || latest;
+  return {
+    ...payload,
+    latestDate: latest.date.toISOString().slice(0, 10),
+    latestClose: latest.c,
+    change: latest.c - prev.c,
+    changePct: prev.c ? ((latest.c - prev.c) / prev.c) * 100 : 0,
+    bars,
+    derivedFromRange: "5y",
+  };
+}
+
+function applyPayload(symbol, payload, range = state.range) {
+  state.data[symbol] = payload;
+  state.dataCache[symbol] = { ...(state.dataCache[symbol] || {}), [range]: payload };
+  state.analysis[symbol] = analyzeSymbol(payload.bars);
+  return payload;
+}
+
+function hydrateRangeFromCache(range) {
+  state.tickers.forEach((symbol) => {
+    const key = normalizeSymbol(symbol);
+    const cached = state.dataCache[key]?.[range];
+    if (cached) {
+      applyPayload(key, cached, range);
+      return;
+    }
+    const fullCached = state.dataCache[key]?.["5y"];
+    if (fullCached) {
+      const derived = derivePayloadForRange(fullCached, range);
+      if (derived) applyPayload(key, derived, range);
+    }
+  });
+}
+
 function formatUnsignedPct(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
@@ -162,31 +231,38 @@ async function fetchTicker(symbol) {
   const key = normalizeSymbol(symbol);
   const cached = state.dataCache[key]?.[state.range];
   if (cached) {
-    state.data[key] = cached;
-    state.analysis[key] = analyzeSymbol(cached.bars);
-    return cached;
+    return applyPayload(key, cached);
+  }
+  const fullCached = state.dataCache[key]?.["5y"];
+  if (fullCached) {
+    const derived = derivePayloadForRange(fullCached, state.range);
+    if (derived) return applyPayload(key, derived);
   }
   const requestKey = `${key}:${state.range}`;
   if (pendingTickerFetches.has(requestKey)) return pendingTickerFetches.get(requestKey);
   setStatus(`Loading ${symbol}...`);
   const task = (async () => {
-    const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(state.range)}`, { cache: "no-store" });
+    const sourceRange = "5y";
+    const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(sourceRange)}`, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
-    payload.bars = payload.bars.map((bar) => ({
+    const normalizedPayload = {
+      ...payload,
+      bars: payload.bars.map((bar) => ({
       date: new Date(String(bar.date || "").includes("T") ? bar.date : `${bar.date}T00:00:00`),
       o: Number(bar.open),
       h: Number(bar.high),
       l: Number(bar.low),
       c: Number(bar.close),
       v: Number(bar.volume || 0),
-    }));
-    state.data[key] = payload;
-    state.dataCache[key] = { ...(state.dataCache[key] || {}), [state.range]: payload };
-    state.analysis[key] = analyzeSymbol(payload.bars);
+      })),
+    };
+    state.dataCache[key] = { ...(state.dataCache[key] || {}), ["5y"]: normalizedPayload };
+    const ranged = derivePayloadForRange(normalizedPayload, state.range) || normalizedPayload;
+    applyPayload(key, ranged);
     fetchFundamentals(key).catch(() => null);
-    setStatus(`${key} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
-    return payload;
+    setStatus(`${key} loaded from ${normalizedPayload.source || "market data"}${normalizedPayload.warning ? " (fallback)" : ""}`);
+    return ranged;
   })();
   pendingTickerFetches.set(requestKey, task);
   try {
@@ -564,16 +640,39 @@ function buildForecastPath(wave, forecast, bars) {
         : current - directionSign * waveSpan * 0.618,
       label: "C",
     });
+    const cycleBase = Number.isFinite(points[points.length - 1]?.price) ? points[points.length - 1].price : current;
+    const nextDirection = -directionSign;
+    const nextW1 = Math.max(waveSpan * 0.85, Math.abs(cycleBase) * 0.035);
+    const nextW2 = nextW1 * 0.382;
+    const nextW3 = nextW1 * 1.618;
+    const nextW4 = nextW3 * 0.236;
+    const nextW5 = nextW1;
+    points.push({ offset: 28, price: cycleBase + nextDirection * nextW1, label: "1" });
+    points.push({ offset: 33, price: cycleBase + nextDirection * (nextW1 - nextW2), label: "2" });
+    points.push({ offset: 41, price: cycleBase + nextDirection * (nextW1 - nextW2 + nextW3), label: "3" });
+    points.push({ offset: 47, price: cycleBase + nextDirection * (nextW1 - nextW2 + nextW3 - nextW4), label: "4" });
+    points.push({ offset: 55, price: cycleBase + nextDirection * (nextW1 - nextW2 + nextW3 - nextW4 + nextW5), label: "5" });
   } else {
     const lowTarget = Number.isFinite(forecast.target618) ? forecast.target618 : current + directionSign * Math.abs(current) * 0.05;
     const highTarget = Number.isFinite(forecast.target1618) ? forecast.target1618 : current + directionSign * Math.abs(current) * 0.1;
-    points.push({ offset: 5, price: lowTarget, label: "I" });
+    points.push({ offset: 5, price: lowTarget, label: "A" });
     points.push({
       offset: 9,
       price: current + (lowTarget - current) * 0.5,
-      label: "II",
+      label: "B",
     });
-    points.push({ offset: 16, price: highTarget, label: "III" });
+    points.push({ offset: 16, price: highTarget, label: "C" });
+    const cycleBase = highTarget;
+    const nextW1 = Math.max(Math.abs(highTarget - lowTarget) * 0.75, Math.abs(current) * 0.03);
+    const nextW2 = nextW1 * 0.382;
+    const nextW3 = nextW1 * 1.618;
+    const nextW4 = nextW3 * 0.236;
+    const nextW5 = nextW1;
+    points.push({ offset: 22, price: cycleBase + directionSign * nextW1, label: "1" });
+    points.push({ offset: 27, price: cycleBase + directionSign * (nextW1 - nextW2), label: "2" });
+    points.push({ offset: 35, price: cycleBase + directionSign * (nextW1 - nextW2 + nextW3), label: "3" });
+    points.push({ offset: 41, price: cycleBase + directionSign * (nextW1 - nextW2 + nextW3 - nextW4), label: "4" });
+    points.push({ offset: 49, price: cycleBase + directionSign * (nextW1 - nextW2 + nextW3 - nextW4 + nextW5), label: "5" });
   }
   return points.filter((point) => Number.isFinite(point.price));
 }
@@ -1826,6 +1925,7 @@ function wireEvents() {
     saveState();
     state.data = {};
     state.analysis = {};
+    hydrateRangeFromCache(state.range);
     renderAll();
     await fetchTicker(state.selected).catch(() => null);
     renderAll();
@@ -2035,6 +2135,8 @@ async function init() {
   wireEvents();
   resizeCanvas();
   renderWatchlist();
+  hydrateRangeFromCache(state.range);
+  renderAll();
   const initialSelected = state.tickers.includes(state.selected) ? state.selected : state.tickers[0];
   if (initialSelected) {
     await fetchTicker(initialSelected).catch((error) => {
