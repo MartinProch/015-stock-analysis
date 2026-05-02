@@ -400,49 +400,41 @@ button:focus-visible {
 }
 
 [data-tip] {
-  position: relative;
+  cursor: help;
 }
 
-[data-tip]::before,
-[data-tip]::after {
-  left: 50%;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  transform: translate(-50%, 6px);
-  transition: opacity 0.15s ease 0.65s, transform 0.15s ease 0.65s;
-  z-index: 40;
-}
-
-[data-tip]::before {
-  content: "";
-  bottom: -9px;
-  border: 6px solid transparent;
-  border-bottom-color: #0f172a;
-}
-
-[data-tip]::after {
-  content: attr(data-tip);
-  bottom: -86px;
-  width: 260px;
-  max-width: min(260px, 80vw);
-  white-space: pre-line;
+.hover-tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  max-width: min(280px, calc(100vw - 20px));
+  padding: 10px 12px;
   border-radius: var(--radius);
   background: #0f172a;
   color: #f8fafc;
   box-shadow: var(--shadow-md);
-  padding: 10px 12px;
+  white-space: pre-line;
   text-align: left;
   font-size: 12px;
   line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-[data-tip]:hover::before,
-[data-tip]:hover::after,
-[data-tip]:focus-visible::before,
-[data-tip]:focus-visible::after {
+.hover-tip.visible {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
+}
+
+.hover-tip[data-side="top"] {
+  transform: translateY(-6px);
+}
+
+.hover-tip.visible[data-side="top"] {
+  transform: translateY(0);
 }
 
 .canvas-wrap {
@@ -637,7 +629,6 @@ button:focus-visible {
   min-height: 0;
   height: 17px;
   padding: 0 2px;
-  overflow: hidden;
   border-radius: 3px;
   box-shadow: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

@@ -390,6 +390,7 @@ When making a bigger feature/design/data-source change, update this README in th
 - Fixed chart-toolbar hover explanations so they render above the canvas instead of being visually covered by the graph.
 - Added tooltip explanations to all Compare metric pills.
 - Rehydrated dynamic tooltips after sidebar tab rerenders so newly rendered controls keep their hover help.
+- Replaced CSS-only pseudo-tooltips with a shared floating tooltip layer attached to `body`, which avoids clipping inside scroll containers and tiny buttons.
 
 ### 2026-05-02 — Real Quote Fallback
 

@@ -58,6 +58,12 @@ const refs = {
 const ctx = refs.canvas.getContext("2d");
 let panStart = null;
 const fundamentalsLoading = new Set();
+const tooltipState = {
+  target: null,
+  text: "",
+  timer: null,
+  el: null,
+};
 
 function saveState() {
   localStorage.setItem(
@@ -1469,6 +1475,95 @@ function hydrateTooltips() {
   });
 }
 
+function ensureTooltipEl() {
+  if (tooltipState.el) return tooltipState.el;
+  const el = document.createElement("div");
+  el.className = "hover-tip";
+  el.hidden = true;
+  document.body.appendChild(el);
+  tooltipState.el = el;
+  return el;
+}
+
+function placeTooltip(target) {
+  const el = ensureTooltipEl();
+  const rect = target.getBoundingClientRect();
+  const margin = 10;
+  const gap = 10;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  let left = rect.left + rect.width / 2 - width / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  const showAbove = rect.top >= height + gap + margin;
+  const top = showAbove ? rect.top - height - gap : rect.bottom + gap;
+  el.dataset.side = showAbove ? "top" : "bottom";
+  el.style.left = `${Math.round(left)}px`;
+  el.style.top = `${Math.round(Math.max(margin, Math.min(top, window.innerHeight - height - margin)))}px`;
+}
+
+function showTooltip(target) {
+  const text = String(target?.dataset.tip || "").trim();
+  if (!text) return;
+  const el = ensureTooltipEl();
+  tooltipState.target = target;
+  tooltipState.text = text;
+  el.textContent = text;
+  el.hidden = false;
+  placeTooltip(target);
+  requestAnimationFrame(() => el.classList.add("visible"));
+}
+
+function hideTooltip() {
+  clearTimeout(tooltipState.timer);
+  tooltipState.timer = null;
+  tooltipState.target = null;
+  const el = tooltipState.el;
+  if (!el) return;
+  el.classList.remove("visible");
+  window.setTimeout(() => {
+    if (!el.classList.contains("visible")) el.hidden = true;
+  }, 160);
+}
+
+function scheduleTooltip(target) {
+  clearTimeout(tooltipState.timer);
+  hideTooltip();
+  tooltipState.timer = window.setTimeout(() => {
+    tooltipState.timer = null;
+    showTooltip(target);
+  }, 650);
+}
+
+function wireTooltips() {
+  document.addEventListener("mouseover", (event) => {
+    const target = event.target.closest("[data-tip]");
+    if (!target) return;
+    if (tooltipState.target === target) return;
+    scheduleTooltip(target);
+  });
+  document.addEventListener("mouseout", (event) => {
+    const from = event.target.closest("[data-tip]");
+    if (!from) return;
+    const related = event.relatedTarget?.closest?.("[data-tip]") || null;
+    if (related === from) return;
+    hideTooltip();
+  });
+  document.addEventListener("focusin", (event) => {
+    const target = event.target.closest("[data-tip]");
+    if (target) scheduleTooltip(target);
+  });
+  document.addEventListener("focusout", (event) => {
+    const target = event.target.closest("[data-tip]");
+    if (target) hideTooltip();
+  });
+  window.addEventListener("scroll", () => {
+    if (tooltipState.target && !tooltipState.el?.hidden) placeTooltip(tooltipState.target);
+  }, true);
+  window.addEventListener("resize", () => {
+    if (tooltipState.target && !tooltipState.el?.hidden) placeTooltip(tooltipState.target);
+  });
+}
+
 function wireEvents() {
   refs.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1682,6 +1777,7 @@ function wireEvents() {
 async function init() {
   loadState();
   hydrateTooltips();
+  wireTooltips();
   refs.sort.value = state.sort;
   refs.timeframes.querySelectorAll("button").forEach((button) => button.classList.toggle("active", button.dataset.range === state.range));
   refs.overlays.querySelectorAll("button").forEach((button) => button.classList.toggle("active", !!state.overlays[button.dataset.toggle]));
