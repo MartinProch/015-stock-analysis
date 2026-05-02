@@ -123,7 +123,7 @@ async function fetchTicker(symbol) {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
   payload.bars = payload.bars.map((bar) => ({
-    date: new Date(`${bar.date}T00:00:00`),
+    date: new Date(String(bar.date || "").includes("T") ? bar.date : `${bar.date}T00:00:00`),
     o: Number(bar.open),
     h: Number(bar.high),
     l: Number(bar.low),
@@ -132,7 +132,7 @@ async function fetchTicker(symbol) {
   }));
   state.data[symbol] = payload;
   state.analysis[symbol] = analyzeSymbol(payload.bars);
-  setStatus(`${symbol} loaded${payload.offline ? " (offline sample)" : ""}`);
+  setStatus(`${symbol} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
   return payload;
 }
 
