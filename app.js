@@ -27,7 +27,14 @@ const state = {
     zones: true,
     volume: true,
     divergence: true,
+    wma200: true,
+    profile: false,
+    channel: false,
+    measured: false,
+    fibtime: false,
+    candles: false,
   },
+  positions: [],
   zoom: null,
   crosshair: null,
 };
@@ -47,6 +54,7 @@ const refs = {
   resetZoom: document.getElementById("resetZoomBtn"),
 };
 const ctx = refs.canvas.getContext("2d");
+let panStart = null;
 
 function saveState() {
   localStorage.setItem(
@@ -57,6 +65,7 @@ function saveState() {
       range: state.range,
       sort: state.sort,
       overlays: state.overlays,
+      positions: state.positions,
     })
   );
 }
@@ -69,9 +78,19 @@ function loadState() {
     if (saved.range) state.range = saved.range;
     if (saved.sort) state.sort = saved.sort;
     if (saved.overlays) state.overlays = { ...state.overlays, ...saved.overlays };
+    if (Array.isArray(saved.positions)) state.positions = saved.positions;
   } catch {
     // Ignore corrupt local workspace data.
   }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function formatPrice(value) {
@@ -446,6 +465,79 @@ function getVisibleFibOverlay(bars, analysis) {
   };
 }
 
+function calcWMAValues(bars, period) {
+  const output = new Array(bars.length).fill(null);
+  const denom = (period * (period + 1)) / 2;
+  for (let i = period - 1; i < bars.length; i += 1) {
+    let sum = 0;
+    for (let j = 0; j < period; j += 1) {
+      sum += bars[i - j].c * (period - j);
+    }
+    output[i] = sum / denom;
+  }
+  return output;
+}
+
+function regressionChannel(bars) {
+  if (!Array.isArray(bars) || bars.length < 12) return null;
+  const n = bars.length;
+  const sumX = (n * (n - 1)) / 2;
+  const sumY = bars.reduce((sum, bar) => sum + bar.c, 0);
+  const sumXY = bars.reduce((sum, bar, index) => sum + index * bar.c, 0);
+  const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
+  const denom = n * sumX2 - sumX * sumX;
+  if (!denom) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const residuals = bars.map((bar, index) => bar.c - (intercept + slope * index));
+  const sigma = Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0) / n);
+  return {
+    center: (index) => intercept + slope * index,
+    upper: (index) => intercept + slope * index + sigma * 1.5,
+    lower: (index) => intercept + slope * index - sigma * 1.5,
+    sigma,
+  };
+}
+
+function detectCandlePatterns(bars) {
+  const patterns = [];
+  for (let i = 2; i < bars.length; i += 1) {
+    const b = bars[i];
+    const b1 = bars[i - 1];
+    const body = Math.abs(b.c - b.o);
+    const range = b.h - b.l;
+    if (!range) continue;
+    const upper = b.h - Math.max(b.o, b.c);
+    const lower = Math.min(b.o, b.c) - b.l;
+    const isUp = b.c >= b.o;
+    const priorDown = b1.c < b1.o;
+    const priorUp = b1.c >= b1.o;
+    if (body / range < 0.08) patterns.push({ index: i, label: "Doji", tone: "neutral" });
+    else if (lower > body * 2.2 && upper < body * 0.7) patterns.push({ index: i, label: isUp ? "Hammer" : "Hanging", tone: isUp ? "bullish" : "bearish" });
+    else if (priorDown && isUp && b.o <= b1.c && b.c >= b1.o) patterns.push({ index: i, label: "Engulf", tone: "bullish" });
+    else if (priorUp && !isUp && b.o >= b1.c && b.c <= b1.o) patterns.push({ index: i, label: "Engulf", tone: "bearish" });
+  }
+  return patterns.slice(-10);
+}
+
+function measuredMoveTargets(wave, bars) {
+  const pivots = wave?.pivots?.length ? wave.pivots : zigzag(bars).slice(-4);
+  if (!pivots || pivots.length < 3) return null;
+  const [a, b, c] = pivots.slice(-3);
+  const ab = b.price - a.price;
+  if (!Number.isFinite(ab) || !ab) return null;
+  return {
+    a,
+    b,
+    c,
+    targets: [
+      { ratio: 1, price: c.price + ab, label: "AB=CD" },
+      { ratio: 1.272, price: c.price + ab * 1.272, label: "1.272x" },
+      { ratio: 1.618, price: c.price + ab * 1.618, label: "1.618x" },
+    ],
+  };
+}
+
 function sortedTickers() {
   const list = [...state.tickers];
   if (state.sort === "score") {
@@ -482,6 +574,14 @@ function renderWatchlist() {
       `;
     })
     .join("");
+}
+
+function computeReturn(bars, lookback) {
+  if (!Array.isArray(bars) || bars.length < 2) return NaN;
+  const end = bars[bars.length - 1]?.c;
+  const start = bars[Math.max(0, bars.length - 1 - lookback)]?.c;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0) return NaN;
+  return ((end - start) / start) * 100;
 }
 
 function renderPanel() {
@@ -535,6 +635,106 @@ function renderPanel() {
         <p class="${analysis.divergence?.type === "bullish" ? "up" : analysis.divergence?.type === "bearish" ? "down" : "muted"}">
           ${analysis.divergence ? `${analysis.divergence.type.toUpperCase()} divergence detected` : "No current divergence in the last lookback window."}
         </p>
+      </div>
+    `;
+    return;
+  }
+  if (state.tab === "rs") {
+    const spyBars = state.data.SPY?.bars || [];
+    const spy1m = computeReturn(spyBars, 21);
+    const spy3m = computeReturn(spyBars, 63);
+    refs.panel.innerHTML = `
+      <div class="card">
+        <h3>Relative strength vs SPY</h3>
+        <div class="scanner-list">
+          ${sortedTickers().map((symbol) => {
+            const bars = state.data[symbol]?.bars || [];
+            const r1 = computeReturn(bars, 21);
+            const r3 = computeReturn(bars, 63);
+            const rs = Number.isFinite(r3) && Number.isFinite(spy3m) ? r3 - spy3m : NaN;
+            const tone = Number.isFinite(rs) ? (rs > 5 ? "up" : rs < -5 ? "down" : "neutral") : "muted";
+            return `
+              <div class="scanner-item" data-symbol="${escapeHtml(symbol)}">
+                <strong>${escapeHtml(symbol)}</strong>
+                <div>
+                  <div class="${tone}">${Number.isFinite(rs) ? `${rs >= 0 ? "+" : ""}${rs.toFixed(1)} pts vs SPY` : "Need data"}</div>
+                  <div class="small">1M ${Number.isFinite(r1) ? formatPct(r1) : "-"} · 3M ${Number.isFinite(r3) ? formatPct(r3) : "-"} · SPY 3M ${Number.isFinite(spy3m) ? formatPct(spy3m) : "-"}</div>
+                </div>
+                <span class="pill">${Number.isFinite(r3) ? formatPct(r3) : "-"}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+    return;
+  }
+  if (state.tab === "portfolio") {
+    const rows = state.positions.map((position) => {
+      const current = state.data[position.symbol]?.latestClose;
+      const value = Number.isFinite(current) ? current * position.shares : NaN;
+      const cost = position.entry * position.shares;
+      const pnl = Number.isFinite(value) ? value - cost : NaN;
+      return { ...position, current, value, cost, pnl };
+    });
+    const totalCost = rows.reduce((sum, row) => sum + (Number.isFinite(row.cost) ? row.cost : 0), 0);
+    const totalValue = rows.reduce((sum, row) => sum + (Number.isFinite(row.value) ? row.value : 0), 0);
+    refs.panel.innerHTML = `
+      <div class="card">
+        <h3>Position tracker</h3>
+        <form id="portfolioForm" class="portfolio-form">
+          <input name="symbol" placeholder="Ticker" value="${escapeHtml(state.selected)}" />
+          <input name="shares" type="number" step="any" min="0" placeholder="Shares" />
+          <input name="entry" type="number" step="any" min="0" placeholder="Entry" />
+          <select name="wave">
+            <option>Wave I</option>
+            <option>Wave II</option>
+            <option>Wave III</option>
+            <option>Wave IV</option>
+            <option>Wave V</option>
+            <option>ABC</option>
+          </select>
+          <button type="submit">Add</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Open positions</h3>
+        <div class="metric-grid">
+          <div class="metric"><span>Total cost</span><strong>${formatPrice(totalCost)}</strong></div>
+          <div class="metric"><span>Total P&L</span><strong class="${totalValue - totalCost >= 0 ? "up" : "down"}">${Number.isFinite(totalValue) ? formatPrice(totalValue - totalCost) : "-"}</strong></div>
+        </div>
+        <div class="portfolio-list">
+          ${rows.length ? rows.map((row, index) => `
+            <div class="portfolio-row">
+              <div>
+                <strong>${escapeHtml(row.symbol)}</strong>
+                <div class="small">${escapeHtml(row.wave)} · ${row.shares} @ ${formatPrice(row.entry)}</div>
+              </div>
+              <div class="${Number.isFinite(row.pnl) && row.pnl >= 0 ? "up" : "down"}">${Number.isFinite(row.pnl) ? formatPrice(row.pnl) : "-"}</div>
+              <button type="button" data-delete-position="${index}" class="ghost">Delete</button>
+            </div>
+          `).join("") : `<p class="muted">No positions yet.</p>`}
+        </div>
+      </div>
+    `;
+    return;
+  }
+  if (state.tab === "help") {
+    refs.panel.innerHTML = `
+      <div class="card">
+        <h3>Keyboard shortcuts</h3>
+        <div class="rules">
+          <div class="rule-row"><span>1-9</span><strong>Jump watchlist</strong></div>
+          <div class="rule-row"><span>← / →</span><strong>Timeframe</strong></div>
+          <div class="rule-row"><span>W F R Z V</span><strong>Toggle core overlays</strong></div>
+          <div class="rule-row"><span>C M P T</span><strong>Channel, measured move, profile, fib time</strong></div>
+          <div class="rule-row"><span>S</span><strong>Open scanner</strong></div>
+          <div class="rule-row"><span>?</span><strong>Open this help</strong></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Added from Wavefront</h3>
+        <p class="small">WMA200, volume profile, regression channel, measured move projections, Fibonacci time zones, candlestick pattern labels, RS ranking, portfolio tracking, and keyboard navigation.</p>
       </div>
     `;
     return;
@@ -632,6 +832,59 @@ function drawChart() {
     ctx.fillText(formatPrice(price), chartRight + 8, y + 4);
   }
 
+  if (state.overlays.profile) {
+    const buckets = 20;
+    const profile = Array.from({ length: buckets }, (_, index) => ({
+      index,
+      volume: 0,
+      price: minP + ((index + 0.5) / buckets) * (maxP - minP),
+    }));
+    bars.forEach((bar) => {
+      const mid = (bar.h + bar.l + bar.c) / 3;
+      const bucket = Math.max(0, Math.min(buckets - 1, Math.floor(((mid - minP) / (maxP - minP)) * buckets)));
+      profile[bucket].volume += bar.v || 0;
+    });
+    const maxProfileVolume = Math.max(...profile.map((bucket) => bucket.volume), 1);
+    profile.forEach((bucket) => {
+      const y = py(bucket.price);
+      const w = (bucket.volume / maxProfileVolume) * Math.min(110, chartW * 0.22);
+      ctx.fillStyle = "rgba(15, 23, 42, 0.1)";
+      ctx.fillRect(chartLeft, y - chartH / buckets / 2, w, Math.max(2, chartH / buckets - 2));
+    });
+    const poc = profile.reduce((best, bucket) => bucket.volume > best.volume ? bucket : best, profile[0]);
+    ctx.strokeStyle = "rgba(217,119,6,0.8)";
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(chartLeft, py(poc.price));
+    ctx.lineTo(chartRight, py(poc.price));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  if (state.overlays.channel) {
+    const channel = regressionChannel(bars);
+    if (channel) {
+      [
+        { fn: channel.upper, color: "rgba(239,68,68,0.58)" },
+        { fn: channel.center, color: "rgba(37,99,235,0.74)" },
+        { fn: channel.lower, color: "rgba(22,163,74,0.58)" },
+      ].forEach((line) => {
+        ctx.strokeStyle = line.color;
+        ctx.lineWidth = line.fn === channel.center ? 1.8 : 1.2;
+        ctx.setLineDash(line.fn === channel.center ? [] : [6, 5]);
+        ctx.beginPath();
+        bars.forEach((_, index) => {
+          const x = px(index);
+          const y = py(line.fn(index));
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    }
+  }
+
   if (state.overlays.zones && analysis?.forecast?.buyLow && analysis?.forecast?.buyHigh) {
     const y1 = py(analysis.forecast.buyLow);
     const y2 = py(analysis.forecast.buyHigh);
@@ -683,6 +936,32 @@ function drawChart() {
   });
   ctx.stroke();
 
+  if (state.overlays.wma200) {
+    const fullBars = state.data[state.selected]?.bars || bars;
+    const wma = calcWMAValues(fullBars, 200);
+    const visibleStart = fullBars.findIndex((bar) => bar.date.getTime() === bars[0].date.getTime());
+    ctx.strokeStyle = "rgba(14,165,233,0.92)";
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    let started = false;
+    bars.forEach((bar, index) => {
+      const fullIndex = visibleStart >= 0 ? visibleStart + index : fullBars.findIndex((item) => item.date.getTime() === bar.date.getTime());
+      const value = wma[fullIndex];
+      if (!Number.isFinite(value)) return;
+      const x = px(index);
+      const y = py(value);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    if (started) ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   if (state.overlays.fibs) {
     const fibOverlay = getVisibleFibOverlay(bars, analysis);
     const visibleLevels = fibOverlay.levels.filter((fib) => {
@@ -723,6 +1002,49 @@ function drawChart() {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(price, chartRight - priceW, y + 4);
     });
+  }
+
+  if (state.overlays.measured) {
+    const mm = measuredMoveTargets(analysis?.wave, bars);
+    if (mm) {
+      mm.targets.forEach((target) => {
+        const y = py(target.price);
+        if (y < chartTop || y > chartBottom) return;
+        ctx.strokeStyle = "rgba(217,119,6,0.82)";
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+        ctx.moveTo(chartLeft, y);
+        ctx.lineTo(chartRight, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#d97706";
+        ctx.font = "700 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+        ctx.fillText(`${target.label} ${formatPrice(target.price)}`, chartLeft + 8, y - 5);
+      });
+    }
+  }
+
+  if (state.overlays.fibtime) {
+    const pivot = analysis?.wave?.pivots?.at(-1);
+    if (pivot) {
+      let pivotIndex = bars.findIndex((bar) => bar.date.getTime() === pivot.date.getTime());
+      if (pivotIndex < 0) pivotIndex = Math.max(0, bars.length - 1);
+      [1, 2, 3, 5, 8, 13, 21, 34].forEach((step) => {
+        const index = pivotIndex + step;
+        if (index >= bars.length) return;
+        const x = px(index);
+        ctx.strokeStyle = "rgba(124,58,237,0.35)";
+        ctx.setLineDash([2, 6]);
+        ctx.beginPath();
+        ctx.moveTo(x, chartTop);
+        ctx.lineTo(x, chartBottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#7c3aed";
+        ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+        ctx.fillText(`T${step}`, x + 3, chartTop + 12);
+      });
+    }
   }
 
   if (state.overlays.waves && analysis?.wave) {
@@ -783,6 +1105,27 @@ function drawChart() {
       ctx.fillStyle = color;
       ctx.fillText(bullish ? "BULL DIV" : "BEAR DIV", px(div.b) - 24, bullish ? y2 + 22 : y2 - 12);
     }
+  }
+
+  if (state.overlays.candles) {
+    detectCandlePatterns(bars).forEach((pattern) => {
+      const bar = bars[pattern.index];
+      if (!bar) return;
+      const bullish = pattern.tone === "bullish";
+      const bearish = pattern.tone === "bearish";
+      const color = bullish ? "#16a34a" : bearish ? "#ef4444" : "#64748b";
+      const x = px(pattern.index);
+      const y = bullish ? py(bar.l) + 18 : py(bar.h) - 14;
+      ctx.font = "700 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+      const tw = ctx.measureText(pattern.label).width + 10;
+      ctx.fillStyle = color;
+      drawRoundRect(x - tw / 2, y - 10, tw, 16, 5);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.fillText(pattern.label, x, y + 2);
+      ctx.textAlign = "left";
+    });
   }
 
   const current = bars[bars.length - 1].c;
@@ -863,6 +1206,22 @@ function renderAll() {
   drawChart();
 }
 
+function setOverlay(key, force = null) {
+  if (!(key in state.overlays)) return;
+  state.overlays[key] = force == null ? !state.overlays[key] : !!force;
+  refs.overlays.querySelector(`[data-toggle="${key}"]`)?.classList.toggle("active", state.overlays[key]);
+  saveState();
+  setStatus(`${key.toUpperCase()} ${state.overlays[key] ? "shown" : "hidden"}`);
+  drawChart();
+}
+
+function stepTimeframe(direction) {
+  const buttons = [...refs.timeframes.querySelectorAll("[data-range]")];
+  const currentIndex = Math.max(0, buttons.findIndex((button) => button.dataset.range === state.range));
+  const next = buttons[Math.max(0, Math.min(buttons.length - 1, currentIndex + direction))];
+  next?.click();
+}
+
 function wireEvents() {
   refs.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -892,12 +1251,7 @@ function wireEvents() {
   refs.overlays.addEventListener("click", (event) => {
     const button = event.target.closest("[data-toggle]");
     if (!button) return;
-    const key = button.dataset.toggle;
-    state.overlays[key] = !state.overlays[key];
-    button.classList.toggle("active", state.overlays[key]);
-    setStatus(`${button.textContent.trim()} ${state.overlays[key] ? "shown" : "hidden"}`);
-    saveState();
-    drawChart();
+    setOverlay(button.dataset.toggle);
   });
   refs.tabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-tab]");
@@ -906,18 +1260,85 @@ function wireEvents() {
     refs.tabs.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
     renderPanel();
   });
+  refs.panel.addEventListener("click", (event) => {
+    const scannerItem = event.target.closest(".scanner-item[data-symbol]");
+    if (scannerItem) {
+      selectSymbol(scannerItem.dataset.symbol).catch((error) => setStatus(error.message));
+      return;
+    }
+    const deleteButton = event.target.closest("[data-delete-position]");
+    if (deleteButton) {
+      state.positions.splice(Number(deleteButton.dataset.deletePosition), 1);
+      saveState();
+      renderPanel();
+    }
+  });
+  refs.panel.addEventListener("submit", (event) => {
+    if (event.target.id !== "portfolioForm") return;
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const symbol = normalizeSymbol(form.get("symbol"));
+    const shares = Number(form.get("shares"));
+    const entry = Number(form.get("entry"));
+    if (!symbol || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(entry) || entry <= 0) {
+      setStatus("Enter ticker, shares and entry price.");
+      return;
+    }
+    state.positions.push({
+      symbol,
+      shares,
+      entry,
+      wave: String(form.get("wave") || "Wave"),
+    });
+    if (!state.tickers.includes(symbol)) state.tickers.push(symbol);
+    saveState();
+    fetchTicker(symbol).catch(() => null).finally(() => {
+      renderAll();
+      setStatus(`Position added: ${symbol}`);
+    });
+  });
   refs.resetZoom.addEventListener("click", () => {
     state.zoom = null;
     drawChart();
   });
+  refs.canvas.addEventListener("dblclick", () => {
+    state.zoom = null;
+    setStatus("Zoom reset");
+    drawChart();
+  });
+  refs.canvas.addEventListener("mousedown", (event) => {
+    if (!state.zoom) return;
+    panStart = { x: event.clientX, start: state.zoom.start, end: state.zoom.end };
+  });
   refs.canvas.addEventListener("mousemove", (event) => {
     const rect = refs.canvas.getBoundingClientRect();
     state.crosshair = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (panStart) {
+      const bars = state.data[state.selected]?.bars || [];
+      const visibleCount = panStart.end - panStart.start + 1;
+      const pxPerBar = Math.max(1, (rect.width - 120) / visibleCount);
+      const shift = Math.round((panStart.x - event.clientX) / pxPerBar);
+      let start = panStart.start + shift;
+      let end = panStart.end + shift;
+      if (start < 0) {
+        end -= start;
+        start = 0;
+      }
+      if (end >= bars.length) {
+        start -= end - bars.length + 1;
+        end = bars.length - 1;
+      }
+      state.zoom = { start: Math.max(0, start), end };
+    }
     drawChart();
   });
   refs.canvas.addEventListener("mouseleave", () => {
     state.crosshair = null;
+    panStart = null;
     drawChart();
+  });
+  window.addEventListener("mouseup", () => {
+    panStart = null;
   });
   refs.canvas.addEventListener("wheel", (event) => {
     const bars = state.data[state.selected]?.bars || [];
@@ -943,6 +1364,59 @@ function wireEvents() {
     state.zoom = start <= 0 && end >= bars.length - 1 ? null : { start: Math.max(0, start), end };
     drawChart();
   }, { passive: false });
+  window.addEventListener("keydown", (event) => {
+    if (event.target && ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) return;
+    const key = String(event.key || "").toLowerCase();
+    if (/^[1-9]$/.test(key)) {
+      const symbol = sortedTickers()[Number(key) - 1];
+      if (symbol) selectSymbol(symbol).catch((error) => setStatus(error.message));
+      return;
+    }
+    if (key === "arrowleft") {
+      event.preventDefault();
+      stepTimeframe(-1);
+      return;
+    }
+    if (key === "arrowright") {
+      event.preventDefault();
+      stepTimeframe(1);
+      return;
+    }
+    const shortcutMap = {
+      w: "waves",
+      f: "fibs",
+      r: "sr",
+      z: "zones",
+      v: "volume",
+      d: "divergence",
+      p: "profile",
+      c: "channel",
+      m: "measured",
+      t: "fibtime",
+      k: "candles",
+    };
+    if (shortcutMap[key]) {
+      setOverlay(shortcutMap[key]);
+      return;
+    }
+    if (key === "s") {
+      state.tab = "scanner";
+      refs.tabs.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item.dataset.tab === "scanner"));
+      renderPanel();
+      return;
+    }
+    if (key === "?") {
+      state.tab = "help";
+      refs.tabs.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item.dataset.tab === "help"));
+      renderPanel();
+      return;
+    }
+    if (key === "escape") {
+      state.crosshair = null;
+      panStart = null;
+      drawChart();
+    }
+  });
   window.addEventListener("resize", resizeCanvas);
 }
 

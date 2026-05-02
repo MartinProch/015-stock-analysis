@@ -533,6 +533,39 @@ button:focus-visible {
   font-size: 11px;
 }
 
+.portfolio-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.portfolio-form button,
+.portfolio-form select {
+  width: 100%;
+}
+
+.portfolio-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.portfolio-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfdff;
+  padding: 10px;
+}
+
+.portfolio-row button {
+  min-height: 28px;
+  padding: 0 8px;
+}
+
 @media (max-width: 1120px) {
   .app-shell {
     grid-template-columns: 228px minmax(0, 1fr);
