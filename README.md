@@ -128,6 +128,7 @@ The count is heuristic and meant as a visual helper, not a definitive Elliott Wa
 
 The Fibs toggle now always has a visible result:
 
+- If a wave is still developing, it can use the latest confirmed pivot versus the current price so the fib structure follows the live move.
 - If a valid wave count exists, it uses wave-based Fibonacci levels.
 - If no clean wave count exists, it falls back to visible range high/low Fibonacci levels.
 - Key levels such as 38.2%, 50%, 61.8%, and 100% get stronger bands and labels.
@@ -155,9 +156,12 @@ RSI is calculated with a 14-period series. The app scans recent peaks/troughs fo
 
 Detected divergence is drawn directly on the chart and summarized in the Risk panel.
 
-### WMA200
+### WMA50 And WMA200
 
-The WMA200 overlay draws a dashed 200-period weighted moving average, matching one of the useful Wavefront overlays from `014-wavefront`.
+The app now supports two weighted moving averages:
+
+- `WMA50` for the intermediate trend and pullback structure
+- `WMA200` for the broad long-term trend filter inspired by `014-wavefront`
 
 ### Volume Profile
 
@@ -391,6 +395,11 @@ When making a bigger feature/design/data-source change, update this README in th
 - Added tooltip explanations to all Compare metric pills.
 - Rehydrated dynamic tooltips after sidebar tab rerenders so newly rendered controls keep their hover help.
 - Replaced CSS-only pseudo-tooltips with a shared floating tooltip layer attached to `body`, which avoids clipping inside scroll containers and tiny buttons.
+
+### 2026-05-02 — WMA50 And Live Fib Swing
+
+- Added a `WMA50` overlay toggle and chart line.
+- Updated Fibonacci rendering so it can follow the active swing from the latest confirmed pivot into the current price.
 
 ### 2026-05-02 — Real Quote Fallback
 

@@ -29,6 +29,7 @@ const state = {
     zones: true,
     volume: true,
     divergence: true,
+    wma50: false,
     wma200: true,
     profile: false,
     channel: false,
@@ -501,6 +502,17 @@ function analyzeSymbol(bars) {
 }
 
 function getVisibleFibOverlay(bars, analysis) {
+  if (analysis?.wave?.pivots?.length >= 2) {
+    const anchor = analysis.wave.pivots[analysis.wave.pivots.length - 2];
+    const current = bars[bars.length - 1]?.c;
+    if (anchor && Number.isFinite(current) && Math.abs(current - anchor.price) > Math.max(1e-6, anchor.price * 0.0025)) {
+      const direction = current >= anchor.price ? "up" : "down";
+      return {
+        source: "live",
+        levels: buildFibLevels(Math.min(anchor.price, current), Math.max(anchor.price, current), direction),
+      };
+    }
+  }
   if (analysis?.wave?.fibLevels?.length) {
     return {
       source: "wave",
@@ -1183,6 +1195,32 @@ function drawChart() {
   });
   ctx.stroke();
 
+  if (state.overlays.wma50) {
+    const fullBars = state.data[state.selected]?.bars || bars;
+    const wma = calcWMAValues(fullBars, 50);
+    const visibleStart = fullBars.findIndex((bar) => bar.date.getTime() === bars[0].date.getTime());
+    ctx.strokeStyle = "rgba(249,115,22,0.95)";
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    let started = false;
+    bars.forEach((bar, index) => {
+      const fullIndex = visibleStart >= 0 ? visibleStart + index : fullBars.findIndex((item) => item.date.getTime() === bar.date.getTime());
+      const value = wma[fullIndex];
+      if (!Number.isFinite(value)) return;
+      const x = px(index);
+      const y = py(value);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    if (started) ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   if (state.overlays.wma200) {
     const fullBars = state.data[state.selected]?.bars || bars;
     const wma = calcWMAValues(fullBars, 200);
@@ -1233,7 +1271,8 @@ function drawChart() {
       ctx.setLineDash([]);
       ctx.lineWidth = 1;
 
-      const label = `${fibOverlay.source === "wave" ? "Wave" : "Range"} ${fib.label}`;
+      const sourceLabel = fibOverlay.source === "live" ? "Live" : fibOverlay.source === "wave" ? "Wave" : "Range";
+      const label = `${sourceLabel} ${fib.label}`;
       const price = formatPrice(fib.price);
       ctx.font = `${isKey ? "700 " : ""}11px ui-monospace, SFMono-Regular, Menlo, monospace`;
       const labelW = ctx.measureText(label).width + 12;
