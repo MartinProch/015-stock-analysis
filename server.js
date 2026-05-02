@@ -15,6 +15,8 @@ const MIME = {
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
+const FUNDAMENTALS_TTL_MS = 12 * 60 * 60 * 1000;
+const fundamentalsCache = new Map();
 
 function send(res, status, body, type = "text/plain; charset=utf-8") {
   res.writeHead(status, {
@@ -142,6 +144,63 @@ function parsePriceText(value) {
   return Number.isFinite(number) ? number : NaN;
 }
 
+function parseMetricText(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || /^(-|--|N\/A|NA)$/i.test(raw)) return NaN;
+  const multiplier = /t$/i.test(raw) ? 1e12 : /b$/i.test(raw) ? 1e9 : /m$/i.test(raw) ? 1e6 : /k$/i.test(raw) ? 1e3 : 1;
+  const number = Number(raw.replace(/[$,%\s,]/g, "").replace(/[TBMK]$/i, ""));
+  return Number.isFinite(number) ? number * multiplier : NaN;
+}
+
+function rawNumber(item) {
+  if (item == null) return NaN;
+  if (typeof item === "number") return item;
+  if (typeof item === "object") {
+    if (Number.isFinite(Number(item.raw))) return Number(item.raw);
+    if (Number.isFinite(Number(item.value))) return Number(item.value);
+    if (typeof item.fmt === "string") return parseMetricText(item.fmt);
+  }
+  return parseMetricText(item);
+}
+
+function summaryValue(summary, key) {
+  return summary?.[key]?.value ?? summary?.[key] ?? null;
+}
+
+function parseFinancialRows(table, scale = 1) {
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const output = {};
+  rows.forEach((row) => {
+    const name = String(row.value1 || row.name || "").trim().toLowerCase();
+    const latest = parseMetricText(row.value2) * scale;
+    const previous = parseMetricText(row.value3) * scale;
+    if (!name || !Number.isFinite(latest)) return;
+    output[name] = { latest, previous };
+  });
+  return output;
+}
+
+function rowValue(rows, patterns) {
+  const found = Object.entries(rows).find(([name]) => patterns.some((pattern) => pattern.test(name)));
+  return found?.[1] || null;
+}
+
+function pctFromRatio(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return NaN;
+  return Math.abs(number) <= 1 ? number * 100 : number;
+}
+
+function compactFundamentals(payload) {
+  const clean = {};
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value == null || value === "") return;
+    if (typeof value === "number" && !Number.isFinite(value)) return;
+    clean[key] = value;
+  });
+  return clean;
+}
+
 async function fetchNasdaqQuote(symbol) {
   const apiSymbol = symbol.replace(/^\^/, "");
   const headers = {
@@ -219,6 +278,126 @@ async function fetchChart(symbol, range = "2y") {
   }
 }
 
+async function fetchYahooFundamentals(symbol) {
+  const modules = [
+    "price",
+    "summaryDetail",
+    "defaultKeyStatistics",
+    "financialData",
+    "earningsTrend",
+  ].join(",");
+  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
+  const json = await httpsJson(url);
+  const result = json?.quoteSummary?.result?.[0];
+  if (!result) throw new Error("Yahoo fundamentals response has no data.");
+  const detail = result.summaryDetail || {};
+  const stats = result.defaultKeyStatistics || {};
+  const financial = result.financialData || {};
+  const trend = result.earningsTrend?.trend?.find((item) => item?.period === "+1y") || {};
+  return compactFundamentals({
+    symbol,
+    label: result.price?.longName || result.price?.shortName || symbol,
+    source: "Yahoo Finance quoteSummary API",
+    marketCap: rawNumber(result.price?.marketCap) || rawNumber(detail.marketCap),
+    trailingPE: rawNumber(detail.trailingPE) || rawNumber(stats.trailingPE),
+    forwardPE: rawNumber(stats.forwardPE) || rawNumber(detail.forwardPE),
+    pegRatio: rawNumber(stats.pegRatio),
+    priceToBook: rawNumber(stats.priceToBook),
+    trailingEps: rawNumber(stats.trailingEps),
+    forwardEps: rawNumber(stats.forwardEps) || rawNumber(trend.earningsEstimate?.avg),
+    dividendYieldPct: pctFromRatio(rawNumber(detail.dividendYield)),
+    annualDividend: rawNumber(detail.dividendRate),
+    beta: rawNumber(detail.beta) || rawNumber(stats.beta),
+    targetMeanPrice: rawNumber(financial.targetMeanPrice),
+    currentPrice: rawNumber(financial.currentPrice) || rawNumber(result.price?.regularMarketPrice),
+    revenueGrowthPct: pctFromRatio(rawNumber(financial.revenueGrowth)),
+    earningsGrowthPct: pctFromRatio(rawNumber(financial.earningsGrowth)),
+    returnOnEquityPct: pctFromRatio(rawNumber(financial.returnOnEquity)),
+    profitMarginPct: pctFromRatio(rawNumber(financial.profitMargins)),
+  });
+}
+
+async function fetchNasdaqFundamentals(symbol) {
+  const apiSymbol = symbol.replace(/^\^/, "");
+  const headers = {
+    "referer": "https://www.nasdaq.com/",
+    "origin": "https://www.nasdaq.com",
+  };
+  const [summaryText, financialText] = await Promise.all([
+    httpsText(`https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/summary?assetclass=stocks`, headers),
+    httpsText(`https://api.nasdaq.com/api/company/${encodeURIComponent(apiSymbol)}/financials?frequency=1`, headers).catch(() => ""),
+  ]);
+  const summary = JSON.parse(summaryText)?.data || {};
+  const summaryData = summary.summaryData || {};
+  const financial = financialText ? JSON.parse(financialText)?.data || {} : {};
+  const income = parseFinancialRows(financial.incomeStatementTable, 1000);
+  const ratios = parseFinancialRows(financial.financialRatiosTable);
+  const revenue = rowValue(income, [/total revenue/, /^revenue$/]);
+  const netIncome = rowValue(income, [/net income/]);
+  const eps = rowValue(ratios, [/earnings per share/, /\beps\b/]);
+  const pe = rowValue(ratios, [/p\/e/, /price.*earnings/]);
+  const roe = rowValue(ratios, [/return on equity/, /\broe\b/]);
+  const margin = rowValue(ratios, [/profit margin/, /net margin/]);
+  const currentPrice = parseMetricText(summary.primaryData?.lastSalePrice || summaryValue(summaryData, "PreviousClose"));
+  const target = parseMetricText(summaryValue(summaryData, "OneYrTarget"));
+  const marketCap = parseMetricText(summaryValue(summaryData, "MarketCap"));
+  const sharesOutstanding = Number.isFinite(marketCap) && Number.isFinite(currentPrice) && currentPrice > 0 ? marketCap / currentPrice : NaN;
+  const revenueGrowthPct = revenue && Number.isFinite(revenue.previous) && revenue.previous
+    ? ((revenue.latest - revenue.previous) / Math.abs(revenue.previous)) * 100
+    : NaN;
+  const earningsGrowthPct = netIncome && Number.isFinite(netIncome.previous) && netIncome.previous
+    ? ((netIncome.latest - netIncome.previous) / Math.abs(netIncome.previous)) * 100
+    : NaN;
+  const trailingEps = Number.isFinite(eps?.latest)
+    ? eps.latest
+    : netIncome && Number.isFinite(sharesOutstanding) && sharesOutstanding > 0
+      ? netIncome.latest / sharesOutstanding
+      : NaN;
+  const trailingPE = Number.isFinite(pe?.latest)
+    ? pe.latest
+    : Number.isFinite(currentPrice) && Number.isFinite(trailingEps) && trailingEps > 0
+      ? currentPrice / trailingEps
+      : NaN;
+  const pegRatio = Number.isFinite(trailingPE) && Number.isFinite(earningsGrowthPct) && earningsGrowthPct > 0
+    ? trailingPE / earningsGrowthPct
+    : NaN;
+  return compactFundamentals({
+    symbol,
+    label: summary.companyName || summary.symbol || symbol,
+    source: "Nasdaq summary and financials APIs",
+    sector: summaryValue(summaryData, "Sector"),
+    industry: summaryValue(summaryData, "Industry"),
+    marketCap,
+    sharesOutstanding,
+    trailingPE,
+    pegRatio,
+    trailingEps,
+    dividendYieldPct: parseMetricText(summaryValue(summaryData, "Yield")),
+    annualDividend: parseMetricText(summaryValue(summaryData, "AnnualizedDividend")),
+    targetMeanPrice: target,
+    currentPrice,
+    revenueGrowthPct,
+    earningsGrowthPct,
+    returnOnEquityPct: roe?.latest,
+    profitMarginPct: margin?.latest,
+  });
+}
+
+async function fetchFundamentals(symbol, force = false) {
+  const key = normalizeSymbol(symbol);
+  const cached = fundamentalsCache.get(key);
+  if (!force && cached && Date.now() - cached.time < FUNDAMENTALS_TTL_MS) return cached.payload;
+  let payload;
+  try {
+    payload = await fetchYahooFundamentals(key);
+  } catch (yahooError) {
+    payload = await fetchNasdaqFundamentals(key);
+    payload.warning = `Yahoo fundamentals failed (${yahooError.message}); showing Nasdaq fundamentals where available.`;
+  }
+  fundamentalsCache.set(key, { time: Date.now(), payload });
+  return payload;
+}
+
 function serveStatic(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -243,6 +422,15 @@ const server = http.createServer(async (req, res) => {
     const range = String(url.searchParams.get("range") || "2y");
     try {
       sendJson(res, 200, await fetchChart(symbol, range));
+    } catch (error) {
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/fundamentals") {
+    const symbol = normalizeSymbol(url.searchParams.get("symbol"));
+    try {
+      sendJson(res, 200, await fetchFundamentals(symbol, url.searchParams.get("force") === "1"));
     } catch (error) {
       sendJson(res, 500, { error: error.message });
     }

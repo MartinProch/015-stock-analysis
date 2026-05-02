@@ -255,12 +255,26 @@ It calculates:
 
 Side-by-side watchlist comparison inspired by the Wavefront Compare tab.
 
-It currently compares locally available technical/performance metrics:
+It compares locally available technical/performance metrics plus a cached fundamentals layer:
 
 - RS 3M versus SPY
 - 3-month return
 - 1-month return
 - 1-day change
+- Market capitalization
+- P/E
+- Forward P/E, when the provider returns it
+- PEG ratio
+- Price/book, when the provider returns it
+- EPS
+- Forward EPS, when the provider returns it
+- Dividend yield
+- Analyst target upside
+- Revenue growth
+- Earnings growth
+- Return on equity
+- Net margin
+- Beta, when the provider returns it
 - Wave score
 - RSI
 - Distance to nearest support
@@ -268,6 +282,14 @@ It currently compares locally available technical/performance metrics:
 - Wave state
 
 Metric pills at the top sort the table. Clicking a ticker row loads that ticker.
+
+Fundamentals are fetched through `/api/fundamentals?symbol=...` and cached in memory by the local server for 12 hours. The server first tries Yahoo `quoteSummary` for forward-looking fields such as forward EPS, forward P/E, PEG, beta, and price/book. If Yahoo rate-limits the request, the app falls back to Nasdaq summary and annual financial statement data. In that fallback path:
+
+- Dividend yield, market cap, analyst target, sector, and industry come from Nasdaq summary data.
+- Revenue growth, earnings growth, ROE, and net margin come from Nasdaq financial statements/ratios.
+- Trailing EPS is estimated from net income divided by estimated shares outstanding.
+- Trailing P/E is estimated from current price divided by trailing EPS.
+- PEG is estimated from trailing P/E divided by annual earnings growth.
 
 ### Portfolio
 
@@ -340,10 +362,11 @@ README.md     This living project description
 ## Known Limitations
 
 - Yahoo can return `HTTP 429` when rate-limited. Nasdaq fallback fixes the fake-price problem but may provide shorter/intraday chart history rather than full OHLCV daily history.
+- Yahoo can also rate-limit fundamentals. When that happens, forward EPS, forward P/E, price/book, and beta may be blank unless another provider supplies them.
 - Nasdaq data can be delayed.
 - The Elliott Wave detector is heuristic and should be reviewed manually.
 - The candlestick detector is intentionally compact.
-- There is no fundamentals tab yet.
+- Fundamentals are for comparison context only and should be verified before investment decisions.
 - There is no full journal/export system yet.
 - The app does not currently perform authenticated data-provider requests.
 
@@ -352,6 +375,13 @@ README.md     This living project description
 When making a bigger feature/design/data-source change, update this README in the same commit or immediately after. This document should stay current enough that a new chat or future developer can inspect the repo and understand what exists without reconstructing the whole conversation.
 
 ## Changelog
+
+### 2026-05-02 — Fundamentals Compare Metrics
+
+- Added `/api/fundamentals` with 12-hour server-side caching.
+- Added PEG, dividend yield, EPS, forward EPS, P/E, forward P/E, price/book, beta, market cap, target upside, revenue growth, earnings growth, ROE, and net margin to Compare.
+- Added Nasdaq fallback calculations for trailing EPS, trailing P/E, and PEG when Yahoo fundamentals are rate-limited.
+- Updated the Compare table with wider valuation/growth columns while keeping existing technical metrics.
 
 ### 2026-05-02 — Real Quote Fallback
 

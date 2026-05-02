@@ -20,6 +20,7 @@ const state = {
   compareMetric: "rs3m",
   data: {},
   analysis: {},
+  fundamentals: {},
   tab: "waves",
   overlays: {
     waves: true,
@@ -56,6 +57,7 @@ const refs = {
 };
 const ctx = refs.canvas.getContext("2d");
 let panStart = null;
+const fundamentalsLoading = new Set();
 
 function saveState() {
   localStorage.setItem(
@@ -108,6 +110,29 @@ function formatPct(value) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
+function formatUnsignedPct(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n.toFixed(n < 10 ? 2 : 1)}%`;
+}
+
+function formatRatio(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2);
+}
+
+function formatCompactNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toFixed(2);
+}
+
 function setStatus(text) {
   refs.status.textContent = text;
 }
@@ -135,8 +160,32 @@ async function fetchTicker(symbol) {
   }));
   state.data[symbol] = payload;
   state.analysis[symbol] = analyzeSymbol(payload.bars);
+  fetchFundamentals(symbol).catch(() => null);
   setStatus(`${symbol} loaded from ${payload.source || "market data"}${payload.warning ? " (fallback)" : ""}`);
   return payload;
+}
+
+async function fetchFundamentals(symbol, force = false) {
+  const key = normalizeSymbol(symbol);
+  if (!key || (!force && state.fundamentals[key]) || fundamentalsLoading.has(key)) return state.fundamentals[key] || null;
+  fundamentalsLoading.add(key);
+  try {
+    const response = await fetch(`/api/fundamentals?symbol=${encodeURIComponent(key)}${force ? "&force=1" : ""}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+    state.fundamentals[key] = payload;
+    return payload;
+  } finally {
+    fundamentalsLoading.delete(key);
+  }
+}
+
+function ensureCompareFundamentals() {
+  const missing = state.tickers.filter((symbol) => !state.fundamentals[symbol] && !fundamentalsLoading.has(symbol));
+  if (!missing.length) return;
+  Promise.all(missing.map((symbol) => fetchFundamentals(symbol).catch(() => null))).then(() => {
+    if (state.tab === "compare") renderPanel();
+  });
 }
 
 function thresholdFor(bars) {
@@ -592,6 +641,20 @@ const COMPARE_METRICS = [
   { key: "return3m", label: "3M %", higherBetter: true, format: formatPct },
   { key: "return1m", label: "1M %", higherBetter: true, format: formatPct },
   { key: "changePct", label: "1D %", higherBetter: true, format: formatPct },
+  { key: "marketCap", label: "Market Cap", higherBetter: true, format: formatCompactNumber },
+  { key: "trailingPE", label: "P/E", higherBetter: false, format: formatRatio },
+  { key: "forwardPE", label: "Fwd P/E", higherBetter: false, format: formatRatio },
+  { key: "pegRatio", label: "PEG", higherBetter: false, format: formatRatio },
+  { key: "priceToBook", label: "P/B", higherBetter: false, format: formatRatio },
+  { key: "trailingEps", label: "EPS", higherBetter: true, format: formatPrice },
+  { key: "forwardEps", label: "Fwd EPS", higherBetter: true, format: formatPrice },
+  { key: "dividendYieldPct", label: "Div Yield", higherBetter: true, format: formatUnsignedPct },
+  { key: "targetUpsidePct", label: "Target Up", higherBetter: true, format: formatPct },
+  { key: "revenueGrowthPct", label: "Rev Growth", higherBetter: true, format: formatPct },
+  { key: "earningsGrowthPct", label: "EPS Growth", higherBetter: true, format: formatPct },
+  { key: "returnOnEquityPct", label: "ROE", higherBetter: true, format: formatUnsignedPct },
+  { key: "profitMarginPct", label: "Net Margin", higherBetter: true, format: formatUnsignedPct },
+  { key: "beta", label: "Beta", higherBetter: false, format: formatRatio },
   { key: "waveScore", label: "Wave", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(0) : "-" },
   { key: "rsi", label: "RSI", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(1) : "-" },
   { key: "supportGap", label: "To Support", higherBetter: false, format: formatPct },
@@ -621,10 +684,32 @@ function buildCompareRows() {
     const return3m = computeReturn(bars, 63);
     const supportGap = levels.support && Number.isFinite(current) ? ((current - levels.support.price) / current) * 100 : NaN;
     const resistanceGap = levels.resistance && Number.isFinite(current) ? ((levels.resistance.price - current) / current) * 100 : NaN;
+    const fundamentals = state.fundamentals[symbol] || {};
+    const targetMeanPrice = Number(fundamentals.targetMeanPrice);
+    const targetBasePrice = Number.isFinite(current) ? current : Number(fundamentals.currentPrice);
     return {
       symbol,
       price: current,
       changePct: Number(data?.changePct),
+      marketCap: Number(fundamentals.marketCap),
+      trailingPE: Number(fundamentals.trailingPE),
+      forwardPE: Number(fundamentals.forwardPE),
+      pegRatio: Number(fundamentals.pegRatio),
+      priceToBook: Number(fundamentals.priceToBook),
+      trailingEps: Number(fundamentals.trailingEps),
+      forwardEps: Number(fundamentals.forwardEps),
+      dividendYieldPct: Number(fundamentals.dividendYieldPct),
+      beta: Number(fundamentals.beta),
+      targetMeanPrice,
+      targetUpsidePct: Number.isFinite(targetMeanPrice) && Number.isFinite(targetBasePrice) && targetBasePrice > 0
+        ? ((targetMeanPrice - targetBasePrice) / targetBasePrice) * 100
+        : NaN,
+      revenueGrowthPct: Number(fundamentals.revenueGrowthPct),
+      earningsGrowthPct: Number(fundamentals.earningsGrowthPct),
+      returnOnEquityPct: Number(fundamentals.returnOnEquityPct),
+      profitMarginPct: Number(fundamentals.profitMarginPct),
+      fundamentalsSource: fundamentals.source || "",
+      fundamentalsWarning: fundamentals.warning || "",
       waveScore: Number(analysis?.confidence),
       wave: analysis?.wave ? `${analysis.wave.pattern} ${analysis.wave.currentWave}` : "No count",
       rsi: Number(analysis?.latestRsi),
@@ -636,6 +721,13 @@ function buildCompareRows() {
       source: data?.source || "",
     };
   });
+}
+
+function metricTone(value, metric) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "neutral";
+  if (metric?.higherBetter === false) return n <= 0 ? "neutral" : "neutral";
+  return n >= 0 ? "up" : "down";
 }
 
 function compareSortValue(row, metric) {
@@ -729,15 +821,17 @@ function renderPanel() {
     return;
   }
   if (state.tab === "compare") {
+    ensureCompareFundamentals();
     const activeMetric = COMPARE_METRICS.find((metric) => metric.key === state.compareMetric) || COMPARE_METRICS[0];
     const rows = buildCompareRows().sort((left, right) => {
       const diff = compareSortValue(right, activeMetric) - compareSortValue(left, activeMetric);
       return activeMetric.higherBetter ? diff : -diff;
     });
+    const fundamentalsPending = state.tickers.some((symbol) => fundamentalsLoading.has(symbol));
     refs.panel.innerHTML = `
       <div class="card">
         <h3>Compare watchlist</h3>
-        <p class="small">Sort the watchlist by locally available technical and performance metrics. Click any ticker row to load it.</p>
+        <p class="small">Sort by technicals, valuation, payout, and growth metrics. Fundamentals are cached locally by the app server.</p>
         <div class="compare-metric-bar">
           ${COMPARE_METRICS.map((metric) => `
             <button type="button" class="${metric.key === activeMetric.key ? "active" : ""}" data-compare-metric="${metric.key}">
@@ -745,6 +839,7 @@ function renderPanel() {
             </button>
           `).join("")}
         </div>
+        ${fundamentalsPending ? `<p class="small">Loading fundamentals for the watchlist...</p>` : ""}
         <div class="compare-table-wrap">
           <table class="compare-table">
             <thead>
@@ -753,6 +848,15 @@ function renderPanel() {
                 <th>${escapeHtml(activeMetric.label)}</th>
                 <th>Price</th>
                 <th>1D</th>
+                <th>P/E</th>
+                <th>Fwd P/E</th>
+                <th>PEG</th>
+                <th>EPS</th>
+                <th>Fwd EPS</th>
+                <th>Yield</th>
+                <th>Target</th>
+                <th>Rev Gr.</th>
+                <th>ROE</th>
                 <th>Wave</th>
                 <th>RSI</th>
                 <th>1M</th>
@@ -764,12 +868,22 @@ function renderPanel() {
             <tbody>
               ${rows.map((row) => {
                 const activeValue = activeMetric.format(row[activeMetric.key]);
+                const activeTone = metricTone(row[activeMetric.key], activeMetric);
                 return `
                   <tr data-symbol="${escapeHtml(row.symbol)}">
                     <td><strong>${escapeHtml(row.symbol)}</strong></td>
-                    <td class="${Number(row[activeMetric.key]) >= 0 ? "up" : "down"}">${escapeHtml(activeValue)}</td>
+                    <td class="${activeTone}">${escapeHtml(activeValue)}</td>
                     <td>${formatPrice(row.price)}</td>
                     <td class="${row.changePct >= 0 ? "up" : "down"}">${formatPct(row.changePct)}</td>
+                    <td>${formatRatio(row.trailingPE)}</td>
+                    <td>${formatRatio(row.forwardPE)}</td>
+                    <td>${formatRatio(row.pegRatio)}</td>
+                    <td>${formatPrice(row.trailingEps)}</td>
+                    <td>${formatPrice(row.forwardEps)}</td>
+                    <td>${formatUnsignedPct(row.dividendYieldPct)}</td>
+                    <td class="${row.targetUpsidePct >= 0 ? "up" : "down"}">${formatPct(row.targetUpsidePct)}</td>
+                    <td class="${row.revenueGrowthPct >= 0 ? "up" : "down"}">${formatPct(row.revenueGrowthPct)}</td>
+                    <td>${formatUnsignedPct(row.returnOnEquityPct)}</td>
                     <td>${escapeHtml(row.wave)}</td>
                     <td>${Number.isFinite(row.rsi) ? row.rsi.toFixed(1) : "-"}</td>
                     <td class="${row.return1m >= 0 ? "up" : "down"}">${formatPct(row.return1m)}</td>
