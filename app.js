@@ -1289,6 +1289,25 @@ function drawForecastLine(chartLeft, chartRight, y, color, label) {
   ctx.fillText(label, chartLeft + 14, y + 4);
 }
 
+function interpolateForecastPoint(path, offset) {
+  if (!Array.isArray(path) || !path.length || !Number.isFinite(offset)) return null;
+  if (offset <= path[0].offset) return { ...path[0] };
+  for (let i = 1; i < path.length; i += 1) {
+    const prev = path[i - 1];
+    const next = path[i];
+    if (offset <= next.offset) {
+      const span = Math.max(1e-9, next.offset - prev.offset);
+      const t = clamp((offset - prev.offset) / span, 0, 1);
+      return {
+        offset,
+        price: prev.price + (next.price - prev.price) * t,
+        label: t < 0.5 ? prev.label : next.label,
+      };
+    }
+  }
+  return { ...path[path.length - 1], offset };
+}
+
 function drawChart() {
   const width = refs.canvas.clientWidth;
   const height = refs.canvas.clientHeight;
@@ -1824,9 +1843,20 @@ function drawChart() {
       ctx.lineTo(chartRight, y);
       ctx.stroke();
       ctx.setLineDash([]);
-      const idx = Math.max(0, Math.min(bars.length - 1, Math.round(((x - chartLeft) / chartW) * (bars.length - 1))));
-      const bar = bars[idx];
-      const label = `${bar.date.toISOString().slice(0, 10)} O ${formatPrice(bar.o)} H ${formatPrice(bar.h)} L ${formatPrice(bar.l)} C ${formatPrice(bar.c)}`;
+      const scaledIndex = ((x - chartLeft) / chartW) * totalSlots;
+      let label = "";
+      if (futureSlots > 0 && scaledIndex > bars.length - 1) {
+        const forecastOffset = scaledIndex - (bars.length - 1);
+        const point = interpolateForecastPoint(forecastPath, forecastOffset);
+        if (point) {
+          const forecastDate = addTradingDays(lastRealDate, Math.round(forecastOffset));
+          label = `${formatAxisDate(forecastDate)} Forecast ${point.label} ${formatPrice(point.price)}`;
+        }
+      } else {
+        const idx = Math.max(0, Math.min(bars.length - 1, Math.round(scaledIndex)));
+        const bar = bars[idx];
+        label = `${bar.date.toISOString().slice(0, 10)} O ${formatPrice(bar.o)} H ${formatPrice(bar.h)} L ${formatPrice(bar.l)} C ${formatPrice(bar.c)}`;
+      }
       ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       const tw = ctx.measureText(label).width + 14;
       ctx.fillStyle = "rgba(13,19,26,0.95)";
