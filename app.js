@@ -194,6 +194,18 @@ function formatAxisDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+function clampForecastPrice(price, current, bars) {
+  if (!Number.isFinite(price) || !Number.isFinite(current) || !Array.isArray(bars) || !bars.length) return price;
+  const lows = bars.map((bar) => bar.l);
+  const highs = bars.map((bar) => bar.h);
+  const minBar = Math.min(...lows);
+  const maxBar = Math.max(...highs);
+  const barRange = Math.max(1, maxBar - minBar);
+  const floor = Math.max(current * 0.35, minBar - barRange * 0.75, 0.01);
+  const ceiling = Math.max(maxBar + barRange * 1.5, current * 1.8);
+  return clamp(price, floor, ceiling);
+}
+
 function hydrateRangeFromCache(range) {
   state.tickers.forEach((symbol) => {
     const key = normalizeSymbol(symbol);
@@ -658,7 +670,7 @@ function buildForecastPath(wave, forecast, bars) {
       label: "C",
     });
     const cycleBase = Number.isFinite(points[points.length - 1]?.price) ? points[points.length - 1].price : current;
-    const nextDirection = -directionSign;
+    const nextDirection = directionSign;
     const nextW1 = Math.max(waveSpan * 0.85, Math.abs(cycleBase) * 0.035);
     const nextW2 = nextW1 * 0.382;
     const nextW3 = nextW1 * 1.618;
@@ -691,7 +703,9 @@ function buildForecastPath(wave, forecast, bars) {
     points.push({ offset: 41, price: cycleBase + directionSign * (nextW1 - nextW2 + nextW3 - nextW4), label: "4" });
     points.push({ offset: 49, price: cycleBase + directionSign * (nextW1 - nextW2 + nextW3 - nextW4 + nextW5), label: "5" });
   }
-  return points.filter((point) => Number.isFinite(point.price));
+  return points
+    .map((point) => ({ ...point, price: clampForecastPrice(point.price, current, bars) }))
+    .filter((point) => Number.isFinite(point.price));
 }
 
 function analyzeSymbol(bars) {
@@ -1388,15 +1402,17 @@ function drawChart() {
       ];
   dateMarks.forEach((mark) => {
     if (!(mark.date instanceof Date) || Number.isNaN(mark.date.getTime())) return;
-    const x = px(mark.index);
+    const rawX = px(mark.index);
     const y = chartBottom + (state.overlays.volume ? 72 : 26);
     if (mark.emphasis) {
+      const x = clamp(rawX, chartLeft + 40, chartRight - 40);
       ctx.fillStyle = "#4f8cff";
       ctx.fillText(formatAxisDate(mark.date), x, y);
       ctx.fillStyle = "#7e8da0";
       ctx.fillText("Now", x, y + 12);
       return;
     }
+    const x = mark.forecast ? chartRight - 34 : clamp(rawX, chartLeft + 34, chartRight - 34);
     if (mark.forecast) ctx.fillStyle = "#7c3aed";
     else ctx.fillStyle = "#7e8da0";
     ctx.fillText(formatAxisDate(mark.date), x, y);
