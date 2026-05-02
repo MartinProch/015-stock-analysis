@@ -637,28 +637,28 @@ function computeReturn(bars, lookback) {
 }
 
 const COMPARE_METRICS = [
-  { key: "rs3m", label: "RS 3M", higherBetter: true, format: (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(1)} pts` : "-" },
-  { key: "return3m", label: "3M %", higherBetter: true, format: formatPct },
-  { key: "return1m", label: "1M %", higherBetter: true, format: formatPct },
-  { key: "changePct", label: "1D %", higherBetter: true, format: formatPct },
-  { key: "marketCap", label: "Mkt Cap", higherBetter: true, format: formatCompactNumber },
-  { key: "trailingPE", label: "P/E", higherBetter: false, format: formatRatio },
-  { key: "forwardPE", label: "Fwd P/E", higherBetter: false, format: formatRatio },
-  { key: "pegRatio", label: "PEG", higherBetter: false, format: formatRatio },
-  { key: "priceToBook", label: "P/B", higherBetter: false, format: formatRatio },
-  { key: "trailingEps", label: "EPS", higherBetter: true, format: formatPrice },
-  { key: "forwardEps", label: "Fwd EPS", higherBetter: true, format: formatPrice },
-  { key: "dividendYieldPct", label: "Yield", higherBetter: true, format: formatUnsignedPct },
-  { key: "targetUpsidePct", label: "Target", higherBetter: true, format: formatPct },
-  { key: "revenueGrowthPct", label: "Rev Gr.", higherBetter: true, format: formatPct },
-  { key: "earningsGrowthPct", label: "Earn Gr.", higherBetter: true, format: formatPct },
-  { key: "returnOnEquityPct", label: "ROE", higherBetter: true, format: formatUnsignedPct },
-  { key: "profitMarginPct", label: "Margin", higherBetter: true, format: formatUnsignedPct },
-  { key: "beta", label: "Beta", higherBetter: false, format: formatRatio },
-  { key: "waveScore", label: "Wave", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(0) : "-" },
-  { key: "rsi", label: "RSI", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(1) : "-" },
-  { key: "supportGap", label: "Support", higherBetter: false, format: formatPct },
-  { key: "resistanceGap", label: "Resist.", higherBetter: true, format: formatPct },
+  { key: "rs3m", label: "RS 3M", higherBetter: true, format: (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(1)} pts` : "-", tip: "Relative Strength 3M|3-month performance versus SPY in percentage points.|Positive means the stock outperformed the market over the same period." },
+  { key: "return3m", label: "3M %", higherBetter: true, format: formatPct, tip: "3-Month Return|Price change over roughly one quarter.|Useful for checking medium-term momentum and trend leadership." },
+  { key: "return1m", label: "1M %", higherBetter: true, format: formatPct, tip: "1-Month Return|Price change over the last month.|Good for recent acceleration or loss of momentum." },
+  { key: "changePct", label: "1D %", higherBetter: true, format: formatPct, tip: "1-Day Change|Latest session percentage move.|Helpful for spotting short-term strength, weakness, and gaps." },
+  { key: "marketCap", label: "Mkt Cap", higherBetter: true, format: formatCompactNumber, tip: "Market Capitalization|Share price multiplied by shares outstanding.|Shows company size and usually correlates with maturity and liquidity." },
+  { key: "trailingPE", label: "P/E", higherBetter: false, format: formatRatio, tip: "Price to Earnings|Current price divided by trailing earnings per share.|Lower can mean cheaper valuation, but always compare with growth and sector norms." },
+  { key: "forwardPE", label: "Fwd P/E", higherBetter: false, format: formatRatio, tip: "Forward P/E|Current price divided by expected next-year earnings.|Useful for seeing how expensive the stock looks against future estimates." },
+  { key: "pegRatio", label: "PEG", higherBetter: false, format: formatRatio, tip: "PEG Ratio|P/E divided by earnings growth rate.|A quick way to compare valuation relative to growth; lower is usually better." },
+  { key: "priceToBook", label: "P/B", higherBetter: false, format: formatRatio, tip: "Price to Book|Share price divided by book value per share.|More relevant for asset-heavy businesses than for software or platform companies." },
+  { key: "trailingEps", label: "EPS", higherBetter: true, format: formatPrice, tip: "Trailing EPS|Earnings per share from the most recent trailing period.|Higher EPS generally supports stronger valuation and financial quality." },
+  { key: "forwardEps", label: "Fwd EPS", higherBetter: true, format: formatPrice, tip: "Forward EPS|Analyst estimate for next-period earnings per share.|Compare it with trailing EPS to gauge expected growth." },
+  { key: "dividendYieldPct", label: "Yield", higherBetter: true, format: formatUnsignedPct, tip: "Dividend Yield|Annual dividend divided by current share price.|Useful for income comparison, but very high yields can also signal stress." },
+  { key: "targetUpsidePct", label: "Target", higherBetter: true, format: formatPct, tip: "Target Upside|Average analyst target relative to the current price.|Best used as context, not as a standalone trading signal." },
+  { key: "revenueGrowthPct", label: "Rev Gr.", higherBetter: true, format: formatPct, tip: "Revenue Growth|Annual percentage growth in sales.|Shows demand and top-line expansion before margins and accounting effects." },
+  { key: "earningsGrowthPct", label: "Earn Gr.", higherBetter: true, format: formatPct, tip: "Earnings Growth|Annual percentage growth in profit.|A strong reading suggests operating leverage or improving business quality." },
+  { key: "returnOnEquityPct", label: "ROE", higherBetter: true, format: formatUnsignedPct, tip: "Return on Equity|Net income relative to shareholder equity.|Useful for measuring how efficiently management turns equity into profit." },
+  { key: "profitMarginPct", label: "Margin", higherBetter: true, format: formatUnsignedPct, tip: "Net Margin|Profit as a percentage of revenue.|Higher margins usually mean more pricing power or better efficiency." },
+  { key: "beta", label: "Beta", higherBetter: false, format: formatRatio, tip: "Beta|Sensitivity of the stock versus the broader market.|Above 1 usually means bigger swings than the index; below 1 means calmer behavior." },
+  { key: "waveScore", label: "Wave", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(0) : "-", tip: "Wave Score|Local confidence score from the Elliott-wave heuristic.|Treat it as a ranking aid, then validate the structure on the chart." },
+  { key: "rsi", label: "RSI", higherBetter: true, format: (value) => Number.isFinite(value) ? value.toFixed(1) : "-", tip: "RSI 14|Momentum oscillator measured on the latest bars.|High RSI can mean strength or overextension; low RSI can mean weakness or opportunity." },
+  { key: "supportGap", label: "Support", higherBetter: false, format: formatPct, tip: "Distance to Support|How far price sits above the nearest local support level.|Smaller distance can mean tighter risk if the support is valid." },
+  { key: "resistanceGap", label: "Resist.", higherBetter: true, format: formatPct, tip: "Distance to Resistance|How much room price has to the nearest local resistance.|More room can mean cleaner upside before the next likely reaction zone." },
 ];
 
 function getNearestLevels(analysis, current) {
@@ -735,16 +735,21 @@ function compareSortValue(row, metric) {
   return Number.isFinite(value) ? value : (metric?.higherBetter ? -Infinity : Infinity);
 }
 
+function setPanelHtml(html) {
+  refs.panel.innerHTML = html;
+  hydrateTooltips();
+}
+
 function renderPanel() {
   const data = state.data[state.selected];
   const analysis = state.analysis[state.selected];
   if (!data || !analysis) {
-    refs.panel.innerHTML = `<div class="card"><h3>No data</h3><p class="muted">Load a ticker first.</p></div>`;
+    setPanelHtml(`<div class="card"><h3>No data</h3><p class="muted">Load a ticker first.</p></div>`);
     return;
   }
   const wave = analysis.wave;
   if (state.tab === "scanner") {
-    refs.panel.innerHTML = `
+    setPanelHtml(`
       <div class="card">
         <h3>Wave scanner</h3>
         <div class="scanner-list">
@@ -764,14 +769,14 @@ function renderPanel() {
           }).join("")}
         </div>
       </div>
-    `;
+    `);
     return;
   }
   if (state.tab === "risk") {
     const nearestSupport = analysis.sr.filter((level) => level.role === "support").at(-1) || analysis.sr.find((level) => level.role === "support");
     const nearestResistance = analysis.sr.find((level) => level.role === "resistance");
     const current = data.latestClose;
-    refs.panel.innerHTML = `
+    setPanelHtml(`
       <div class="card">
         <h3>Risk map</h3>
         <div class="metric-grid">
@@ -787,14 +792,14 @@ function renderPanel() {
           ${analysis.divergence ? `${analysis.divergence.type.toUpperCase()} divergence detected` : "No current divergence in the last lookback window."}
         </p>
       </div>
-    `;
+    `);
     return;
   }
   if (state.tab === "rs") {
     const spyBars = state.data.SPY?.bars || [];
     const spy1m = computeReturn(spyBars, 21);
     const spy3m = computeReturn(spyBars, 63);
-    refs.panel.innerHTML = `
+    setPanelHtml(`
       <div class="card">
         <h3>Relative strength vs SPY</h3>
         <div class="scanner-list">
@@ -817,7 +822,7 @@ function renderPanel() {
           }).join("")}
         </div>
       </div>
-    `;
+    `);
     return;
   }
   if (state.tab === "compare") {
@@ -828,13 +833,18 @@ function renderPanel() {
       return activeMetric.higherBetter ? diff : -diff;
     });
     const fundamentalsPending = state.tickers.some((symbol) => fundamentalsLoading.has(symbol));
-    refs.panel.innerHTML = `
+    setPanelHtml(`
       <div class="card">
         <h3>Compare watchlist</h3>
         <p class="small">Sort by technicals, valuation, payout, and growth metrics. Fundamentals are cached locally by the app server.</p>
         <div class="compare-metric-bar">
           ${COMPARE_METRICS.map((metric) => `
-            <button type="button" class="${metric.key === activeMetric.key ? "active" : ""}" data-compare-metric="${metric.key}">
+            <button
+              type="button"
+              class="${metric.key === activeMetric.key ? "active" : ""}"
+              data-compare-metric="${metric.key}"
+              data-tip="${escapeHtml(metric.tip || metric.label)}"
+            >
               ${escapeHtml(metric.label)}
             </button>
           `).join("")}
@@ -897,7 +907,7 @@ function renderPanel() {
           </table>
         </div>
       </div>
-    `;
+    `);
     return;
   }
   if (state.tab === "portfolio") {
@@ -910,7 +920,7 @@ function renderPanel() {
     });
     const totalCost = rows.reduce((sum, row) => sum + (Number.isFinite(row.cost) ? row.cost : 0), 0);
     const totalValue = rows.reduce((sum, row) => sum + (Number.isFinite(row.value) ? row.value : 0), 0);
-    refs.panel.innerHTML = `
+    setPanelHtml(`
       <div class="card">
         <h3>Position tracker</h3>
         <form id="portfolioForm" class="portfolio-form">
@@ -947,11 +957,11 @@ function renderPanel() {
           `).join("") : `<p class="muted">No positions yet.</p>`}
         </div>
       </div>
-    `;
+    `);
     return;
   }
   if (state.tab === "help") {
-    refs.panel.innerHTML = `
+    setPanelHtml(`
       <div class="card">
         <h3>Keyboard shortcuts</h3>
         <div class="rules">
@@ -967,10 +977,10 @@ function renderPanel() {
         <h3>Added from Wavefront</h3>
         <p class="small">WMA200, volume profile, regression channel, measured move projections, Fibonacci time zones, candlestick pattern labels, RS ranking, portfolio tracking, and keyboard navigation.</p>
       </div>
-    `;
+    `);
     return;
   }
-  refs.panel.innerHTML = `
+  setPanelHtml(`
     <div class="card">
       <h3>${data.symbol} · ${data.label}</h3>
       <div class="metric-grid">
@@ -1001,7 +1011,7 @@ function renderPanel() {
         <div class="metric-row"><span>Invalidation / stop</span><strong>${formatPrice(analysis.forecast.stop)}</strong></div>
       ` : `<p class="muted">Targets need a valid wave count.</p>`}
     </div>
-  `;
+  `);
 }
 
 function visibleBars() {

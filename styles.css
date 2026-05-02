@@ -320,6 +320,8 @@ button:focus-visible {
 }
 
 .chart-card {
+  position: relative;
+  isolation: isolate;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -328,6 +330,8 @@ button:focus-visible {
 }
 
 .chart-card-head {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -350,6 +354,8 @@ button:focus-visible {
 }
 
 .chart-toolbar {
+  position: relative;
+  z-index: 3;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: #fbfdff;
@@ -405,7 +411,7 @@ button:focus-visible {
   position: absolute;
   transform: translate(-50%, 6px);
   transition: opacity 0.15s ease 0.65s, transform 0.15s ease 0.65s;
-  z-index: 30;
+  z-index: 40;
 }
 
 [data-tip]::before {
@@ -441,6 +447,7 @@ button:focus-visible {
 
 .canvas-wrap {
   position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   background:

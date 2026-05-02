@@ -204,6 +204,8 @@ This is a compact implementation, not the full 14-pattern engine from `014-wavef
 
 Timeframe and overlay controls include delayed hover tooltips. Each tooltip explains what the toggle draws and when it is useful, mirroring the guidance-heavy toolbar style from `014-wavefront`.
 
+The Compare metric pills use the same tooltip system, so valuation, growth, momentum, and risk metrics all expose a short plain-English explanation on hover.
+
 ## Right Panel Tabs
 
 ### Waves
@@ -382,6 +384,12 @@ When making a bigger feature/design/data-source change, update this README in th
 - Added PEG, dividend yield, EPS, forward EPS, P/E, forward P/E, price/book, beta, market cap, target upside, revenue growth, earnings growth, ROE, and net margin to Compare.
 - Added Nasdaq fallback calculations for trailing EPS, trailing P/E, and PEG when Yahoo fundamentals are rate-limited.
 - Updated the Compare table with wider valuation/growth columns while keeping existing technical metrics.
+
+### 2026-05-02 — Tooltip Visibility And Compare Help
+
+- Fixed chart-toolbar hover explanations so they render above the canvas instead of being visually covered by the graph.
+- Added tooltip explanations to all Compare metric pills.
+- Rehydrated dynamic tooltips after sidebar tab rerenders so newly rendered controls keep their hover help.
 
 ### 2026-05-02 — Real Quote Fallback
 
