@@ -1801,7 +1801,7 @@ function drawChart() {
     });
   }
 
-  const current = bars[bars.length - 1].c;
+  const current = Number(state.data[state.selected]?.latestClose);
   const currentY = py(current);
   ctx.setLineDash([5, 5]);
   ctx.strokeStyle = "rgba(140,183,255,0.75)";
