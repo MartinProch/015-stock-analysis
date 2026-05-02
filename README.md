@@ -132,6 +132,7 @@ The Fibs toggle now always has a visible result:
 - If a valid wave count exists, it uses wave-based Fibonacci levels.
 - If no clean wave count exists, it falls back to visible range high/low Fibonacci levels.
 - Key levels such as 38.2%, 50%, 61.8%, and 100% get stronger bands and labels.
+- The chart scale now expands to include forward fib extensions, so future targets stay visible instead of being clipped off-screen.
 
 ### Support And Resistance
 
@@ -407,6 +408,11 @@ When making a bigger feature/design/data-source change, update this README in th
 - Added Nasdaq quote/chart fallback when Yahoo is blocked or rate-limited.
 - Updated frontend status text to show the data source and fallback state.
 - Verified `NVDA` no longer shows the generated fake sample price.
+
+### 2026-05-02 — Timeframe And Fib Visibility Fix
+
+- Replaced the broken Nasdaq intraday-only chart fallback with range-based Nasdaq historical daily data when Yahoo chart data is rate-limited.
+- Fixed the chart scale so forward Fibonacci extensions and measured-move targets remain visible.
 
 ### 2026-05-02 — YTD, Tooltips, And Compare
 

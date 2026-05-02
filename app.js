@@ -1069,11 +1069,31 @@ function drawChart() {
   const chartBottom = height - pad.bottom;
   const chartW = Math.max(40, chartRight - chartLeft);
   const chartH = Math.max(40, chartBottom - chartTop);
-  const min = Math.min(...bars.map((bar) => bar.l));
-  const max = Math.max(...bars.map((bar) => bar.h));
+  const fibOverlay = state.overlays.fibs ? getVisibleFibOverlay(bars, analysis) : null;
+  const measuredMove = state.overlays.measured ? measuredMoveTargets(analysis?.wave, bars) : null;
+  const minCandidates = bars.map((bar) => bar.l);
+  const maxCandidates = bars.map((bar) => bar.h);
+  if (fibOverlay?.levels?.length) {
+    fibOverlay.levels.forEach((fib) => {
+      if (Number.isFinite(fib.price)) {
+        minCandidates.push(fib.price);
+        maxCandidates.push(fib.price);
+      }
+    });
+  }
+  if (measuredMove?.targets?.length) {
+    measuredMove.targets.forEach((target) => {
+      if (Number.isFinite(target.price)) {
+        minCandidates.push(target.price);
+        maxCandidates.push(target.price);
+      }
+    });
+  }
+  const min = Math.min(...minCandidates);
+  const max = Math.max(...maxCandidates);
   const span = max - min || 1;
   const minP = Math.max(0, min - span * 0.08);
-  const maxP = max + span * 0.1;
+  const maxP = max + span * 0.12;
   const px = (index) => chartLeft + (index / Math.max(1, bars.length - 1)) * chartW;
   const py = (price) => chartBottom - ((price - minP) / (maxP - minP)) * chartH;
 
@@ -1248,7 +1268,6 @@ function drawChart() {
   }
 
   if (state.overlays.fibs) {
-    const fibOverlay = getVisibleFibOverlay(bars, analysis);
     const visibleLevels = fibOverlay.levels.filter((fib) => {
       const y = py(fib.price);
       return y >= chartTop && y <= chartBottom;
@@ -1291,7 +1310,7 @@ function drawChart() {
   }
 
   if (state.overlays.measured) {
-    const mm = measuredMoveTargets(analysis?.wave, bars);
+    const mm = measuredMove;
     if (mm) {
       mm.targets.forEach((target) => {
         const y = py(target.price);

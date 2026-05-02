@@ -144,6 +144,46 @@ function parsePriceText(value) {
   return Number.isFinite(number) ? number : NaN;
 }
 
+function formatNasdaqDate(value) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function rangeStartDate(range) {
+  const now = new Date();
+  const start = new Date(now);
+  if (range === "5d") start.setDate(start.getDate() - 7);
+  else if (range === "1mo") start.setMonth(start.getMonth() - 1);
+  else if (range === "3mo") start.setMonth(start.getMonth() - 3);
+  else if (range === "6mo") start.setMonth(start.getMonth() - 6);
+  else if (range === "ytd") return new Date(now.getFullYear(), 0, 1);
+  else if (range === "1y") start.setFullYear(start.getFullYear() - 1);
+  else if (range === "2y") start.setFullYear(start.getFullYear() - 2);
+  else if (range === "5y") start.setFullYear(start.getFullYear() - 5);
+  else start.setFullYear(start.getFullYear() - 2);
+  return start;
+}
+
+function parseNasdaqHistoricalRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const close = parsePriceText(row.close);
+      const open = parsePriceText(row.open);
+      const high = parsePriceText(row.high);
+      const low = parsePriceText(row.low);
+      const volume = parsePriceText(row.volume);
+      if (![close, open, high, low].every(Number.isFinite)) return null;
+      const [month, day, year] = String(row.date || "").split("/");
+      const date = year && month && day ? `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}` : null;
+      if (!date) return null;
+      return { date, open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 };
+    })
+    .filter(Boolean)
+    .reverse();
+}
+
 function parseMetricText(value) {
   const raw = String(value ?? "").trim();
   if (!raw || /^(-|--|N\/A|NA)$/i.test(raw)) return NaN;
@@ -267,13 +307,60 @@ async function fetchNasdaqQuote(symbol) {
   };
 }
 
+async function fetchNasdaqHistorical(symbol, range = "2y") {
+  const apiSymbol = symbol.replace(/^\^/, "");
+  const headers = {
+    "referer": "https://www.nasdaq.com/",
+    "origin": "https://www.nasdaq.com",
+  };
+  const fromdate = formatNasdaqDate(rangeStartDate(range));
+  const todate = formatNasdaqDate(new Date());
+  const fetchPage = async (offset) => {
+    const text = await httpsText(
+      `https://api.nasdaq.com/api/quote/${encodeURIComponent(apiSymbol)}/historical?assetclass=stocks&fromdate=${encodeURIComponent(fromdate)}&todate=${encodeURIComponent(todate)}&offset=${offset}`,
+      headers
+    );
+    return JSON.parse(text)?.data || {};
+  };
+  const first = await fetchPage(0);
+  const firstRows = parseNasdaqHistoricalRows(first?.tradesTable?.rows);
+  const total = Number(first?.totalRecords) || firstRows.length;
+  const pageSize = Math.max(1, firstRows.length);
+  let rows = [...firstRows];
+  for (let offset = pageSize; offset < total; offset += pageSize) {
+    const next = await fetchPage(offset);
+    rows = rows.concat(parseNasdaqHistoricalRows(next?.tradesTable?.rows));
+  }
+  rows.sort((a, b) => a.date.localeCompare(b.date));
+  if (!rows.length) throw new Error("Nasdaq historical response has no usable rows.");
+  const last = rows[rows.length - 1];
+  const prev = rows[rows.length - 2] || last;
+  return {
+    symbol,
+    label: symbol,
+    currency: "USD",
+    source: "Nasdaq historical API",
+    latestDate: last.date,
+    latestClose: last.close,
+    change: last.close - prev.close,
+    changePct: prev.close ? ((last.close - prev.close) / prev.close) * 100 : 0,
+    bars: rows,
+    delayed: true,
+  };
+}
+
 async function fetchChart(symbol, range = "2y") {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=1d`;
   try {
     return parseYahoo(await httpsJson(url), symbol);
   } catch (error) {
+    const historical = await fetchNasdaqHistorical(symbol, range).catch(() => null);
+    if (historical) {
+      historical.warning = `Yahoo chart failed (${error.message}); showing Nasdaq historical data instead.`;
+      return historical;
+    }
     const quote = await fetchNasdaqQuote(symbol);
-    quote.warning = `Yahoo chart failed (${error.message}); showing Nasdaq quote data instead.`;
+    quote.warning = `Yahoo chart failed (${error.message}); showing Nasdaq intraday quote data instead.`;
     return quote;
   }
 }
