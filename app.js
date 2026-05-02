@@ -176,6 +176,24 @@ function applyPayload(symbol, payload, range = state.range) {
   return payload;
 }
 
+function addTradingDays(date, count) {
+  const next = new Date(date);
+  let remaining = Math.max(0, count);
+  while (remaining > 0) {
+    next.setDate(next.getDate() + 1);
+    const day = next.getDay();
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+  return next;
+}
+
+function formatAxisDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function hydrateRangeFromCache(range) {
   state.tickers.forEach((symbol) => {
     const key = normalizeSymbol(symbol);
@@ -242,7 +260,7 @@ async function fetchTicker(symbol) {
   if (pendingTickerFetches.has(requestKey)) return pendingTickerFetches.get(requestKey);
   setStatus(`Loading ${symbol}...`);
   const task = (async () => {
-    const sourceRange = "5y";
+    const sourceRange = state.range;
     const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(sourceRange)}`, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
@@ -257,12 +275,11 @@ async function fetchTicker(symbol) {
       v: Number(bar.volume || 0),
       })),
     };
-    state.dataCache[key] = { ...(state.dataCache[key] || {}), ["5y"]: normalizedPayload };
-    const ranged = derivePayloadForRange(normalizedPayload, state.range) || normalizedPayload;
-    applyPayload(key, ranged);
+    state.dataCache[key] = { ...(state.dataCache[key] || {}), [state.range]: normalizedPayload };
+    applyPayload(key, normalizedPayload, state.range);
     fetchFundamentals(key).catch(() => null);
     setStatus(`${key} loaded from ${normalizedPayload.source || "market data"}${normalizedPayload.warning ? " (fallback)" : ""}`);
-    return ranged;
+    return normalizedPayload;
   })();
   pendingTickerFetches.set(requestKey, task);
   try {
@@ -1319,6 +1336,7 @@ function drawChart() {
   const totalSlots = Math.max(1, bars.length - 1 + futureSlots);
   const px = (index) => chartLeft + (index / totalSlots) * chartW;
   const py = (price) => chartBottom - ((price - minP) / (maxP - minP)) * chartH;
+  const lastRealDate = bars[bars.length - 1]?.date || new Date();
 
   if (futureSlots > 0) {
     const futureLeft = px(bars.length - 1);
@@ -1349,6 +1367,41 @@ function drawChart() {
     ctx.stroke();
     ctx.fillText(formatPrice(price), chartRight + 8, y + 4);
   }
+
+  ctx.fillStyle = "#7e8da0";
+  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.textAlign = "center";
+  const dateMarks = futureSlots > 0
+    ? [
+        { index: 0, date: bars[0].date },
+        { index: Math.max(0, Math.round((bars.length - 1) * 0.5)), date: bars[Math.max(0, Math.round((bars.length - 1) * 0.5))].date },
+        { index: bars.length - 1, date: lastRealDate, emphasis: true },
+        { index: bars.length - 1 + Math.round(futureSlots * 0.33), date: addTradingDays(lastRealDate, Math.round(futureSlots * 0.33)) },
+        { index: bars.length - 1 + Math.round(futureSlots * 0.66), date: addTradingDays(lastRealDate, Math.round(futureSlots * 0.66)) },
+        { index: bars.length - 1 + futureSlots, date: addTradingDays(lastRealDate, futureSlots), forecast: true },
+      ]
+    : [
+        { index: 0, date: bars[0].date },
+        { index: Math.max(0, Math.round((bars.length - 1) * 0.33)), date: bars[Math.max(0, Math.round((bars.length - 1) * 0.33))].date },
+        { index: Math.max(0, Math.round((bars.length - 1) * 0.66)), date: bars[Math.max(0, Math.round((bars.length - 1) * 0.66))].date },
+        { index: bars.length - 1, date: lastRealDate, emphasis: true },
+      ];
+  dateMarks.forEach((mark) => {
+    if (!(mark.date instanceof Date) || Number.isNaN(mark.date.getTime())) return;
+    const x = px(mark.index);
+    const y = chartBottom + (state.overlays.volume ? 72 : 26);
+    if (mark.emphasis) {
+      ctx.fillStyle = "#4f8cff";
+      ctx.fillText(formatAxisDate(mark.date), x, y);
+      ctx.fillStyle = "#7e8da0";
+      ctx.fillText("Now", x, y + 12);
+      return;
+    }
+    if (mark.forecast) ctx.fillStyle = "#7c3aed";
+    else ctx.fillStyle = "#7e8da0";
+    ctx.fillText(formatAxisDate(mark.date), x, y);
+  });
+  ctx.textAlign = "left";
 
   if (state.overlays.profile) {
     const buckets = 20;
