@@ -1313,6 +1313,7 @@ function drawChart() {
   const height = refs.canvas.clientHeight;
   ctx.clearRect(0, 0, width, height);
   const bars = visibleBars();
+  const fullBars = state.data[state.selected]?.bars || bars;
   const analysis = state.analysis[state.selected];
   refs.empty.style.display = bars.length ? "none" : "grid";
   if (!bars.length) return;
@@ -1369,7 +1370,7 @@ function drawChart() {
   const totalSlots = Math.max(1, bars.length - 1 + futureSlots);
   const px = (index) => chartLeft + (index / totalSlots) * chartW;
   const py = (price) => chartBottom - ((price - minP) / (maxP - minP)) * chartH;
-  const lastRealDate = bars[bars.length - 1]?.date || new Date();
+  const lastRealDate = fullBars[fullBars.length - 1]?.date || bars[bars.length - 1]?.date || new Date();
 
   if (futureSlots > 0) {
     const futureLeft = px(bars.length - 1);
