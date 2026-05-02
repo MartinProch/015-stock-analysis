@@ -613,16 +613,21 @@ button:focus-visible {
 }
 
 .compare-metric-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
   margin: 10px 0 12px;
 }
 
 .compare-metric-bar button {
-  min-height: 28px;
-  padding: 0 9px;
-  font-size: 12px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 4px;
+  overflow: hidden;
+  font-size: 10.5px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compare-table-wrap {
@@ -708,6 +713,10 @@ button:focus-visible {
     max-height: 240px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .compare-metric-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .chart-area {
