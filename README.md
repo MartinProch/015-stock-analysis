@@ -148,6 +148,19 @@ The chart labels:
 
 The Zones overlay uses current wave forecast data, especially wave 4 / wave 5 target structures when available, to draw a simple green buy/interest band.
 
+### Forecast Targets
+
+Forecast targets are now visible directly in the chart, not only in the side panel.
+
+The chart can draw:
+
+- `Forecast 0.618`
+- `Forecast 1.0`
+- `Forecast 1.618`
+- `Forecast stop`
+
+These lines are projected from the current move logic already used in the Waves panel, and the chart scale expands to keep them visible when they sit above or below the recent price range.
+
 ### RSI Divergence
 
 RSI is calculated with a 14-period series. The app scans recent peaks/troughs for:

@@ -1076,6 +1076,24 @@ function drawRoundRect(x, y, w, h, r) {
   else ctx.rect(x, y, w, h);
 }
 
+function drawForecastLine(chartLeft, chartRight, y, color, label) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([9, 5]);
+  ctx.beginPath();
+  ctx.moveTo(chartLeft, y);
+  ctx.lineTo(chartRight, y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = color;
+  ctx.font = "700 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  const textW = ctx.measureText(label).width + 12;
+  drawRoundRect(chartLeft + 8, y - 10, textW, 18, 5);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, chartLeft + 14, y + 4);
+}
+
 function drawChart() {
   const width = refs.canvas.clientWidth;
   const height = refs.canvas.clientHeight;
@@ -1109,6 +1127,15 @@ function drawChart() {
       if (Number.isFinite(target.price)) {
         minCandidates.push(target.price);
         maxCandidates.push(target.price);
+      }
+    });
+  }
+  if (analysis?.forecast) {
+    ["target618", "target100", "target1618", "stop", "buyLow", "buyHigh"].forEach((key) => {
+      const price = analysis.forecast[key];
+      if (Number.isFinite(price)) {
+        minCandidates.push(price);
+        maxCandidates.push(price);
       }
     });
   }
@@ -1192,6 +1219,22 @@ function drawChart() {
     const y2 = py(analysis.forecast.buyHigh);
     ctx.fillStyle = "rgba(33,200,117,0.09)";
     ctx.fillRect(chartLeft, Math.min(y1, y2), chartW, Math.abs(y2 - y1));
+  }
+
+  if (analysis?.forecast) {
+    const forecastLines = [
+      { key: "target618", color: "rgba(37,99,235,0.88)", label: "Forecast 0.618" },
+      { key: "target100", color: "rgba(79,70,229,0.88)", label: "Forecast 1.0" },
+      { key: "target1618", color: "rgba(14,165,233,0.9)", label: "Forecast 1.618" },
+      { key: "stop", color: "rgba(239,68,68,0.88)", label: "Forecast stop" },
+    ];
+    forecastLines.forEach((line) => {
+      const price = analysis.forecast[line.key];
+      if (!Number.isFinite(price)) return;
+      const y = py(price);
+      if (y < chartTop || y > chartBottom) return;
+      drawForecastLine(chartLeft, chartRight, y, line.color, `${line.label} ${formatPrice(price)}`);
+    });
   }
 
   if (state.overlays.sr && analysis?.sr) {
