@@ -1,4 +1,6 @@
 const STORAGE_KEY = "stock-analysis-wavefront-lite-v1";
+const CHART_CACHE_KEY = "stock-analysis-wavefront-lite-chart-cache-v1";
+const CHART_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_TICKERS = ["SPY", "AAPL", "MSFT", "TSLA"];
 const WAVE_COLORS = {
   "0": "#7e8da0",
@@ -102,6 +104,70 @@ function loadState() {
   }
 }
 
+function serializePayloadForStorage(payload) {
+  if (!payload?.bars?.length) return null;
+  return {
+    ...payload,
+    bars: payload.bars.map((bar) => ({
+      date: bar.date instanceof Date ? bar.date.toISOString().slice(0, 10) : String(bar.date || "").slice(0, 10),
+      open: bar.o ?? bar.open,
+      high: bar.h ?? bar.high,
+      low: bar.l ?? bar.low,
+      close: bar.c ?? bar.close,
+      volume: bar.v ?? bar.volume ?? 0,
+    })),
+  };
+}
+
+function normalizePayload(payload) {
+  if (!payload?.bars?.length) return null;
+  return {
+    ...payload,
+    bars: payload.bars.map((bar) => ({
+      date: new Date(String(bar.date || "").includes("T") ? String(bar.date) : `${bar.date}T00:00:00`),
+      o: Number(bar.o ?? bar.open),
+      h: Number(bar.h ?? bar.high),
+      l: Number(bar.l ?? bar.low),
+      c: Number(bar.c ?? bar.close),
+      v: Number(bar.v ?? bar.volume ?? 0),
+    })),
+  };
+}
+
+function persistChartCache() {
+  try {
+    const output = {};
+    Object.entries(state.dataCache).forEach(([symbol, ranges]) => {
+      const nextRanges = {};
+      Object.entries(ranges || {}).forEach(([range, payload]) => {
+        const serialized = serializePayloadForStorage(payload);
+        if (serialized) nextRanges[range] = { time: Date.now(), payload: serialized };
+      });
+      if (Object.keys(nextRanges).length) output[symbol] = nextRanges;
+    });
+    localStorage.setItem(CHART_CACHE_KEY, JSON.stringify(output));
+  } catch {
+    // Ignore local storage quota/corruption issues.
+  }
+}
+
+function loadPersistentChartCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CHART_CACHE_KEY) || "{}");
+    Object.entries(raw).forEach(([symbol, ranges]) => {
+      const nextRanges = {};
+      Object.entries(ranges || {}).forEach(([range, entry]) => {
+        if (!entry?.time || Date.now() - Number(entry.time) > CHART_CACHE_TTL_MS) return;
+        const normalized = normalizePayload(entry.payload);
+        if (normalized) nextRanges[range] = normalized;
+      });
+      if (Object.keys(nextRanges).length) state.dataCache[symbol] = nextRanges;
+    });
+  } catch {
+    // Ignore corrupt persistent cache.
+  }
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -125,6 +191,22 @@ function formatPct(value) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function calcATR(bars, period = 14) {
+  if (!Array.isArray(bars) || bars.length < 2) return NaN;
+  const start = Math.max(1, bars.length - period);
+  let sum = 0;
+  let count = 0;
+  for (let i = start; i < bars.length; i += 1) {
+    const high = Number(bars[i].h);
+    const low = Number(bars[i].l);
+    const prevClose = Number(bars[i - 1]?.c ?? bars[i].c);
+    if (![high, low, prevClose].every(Number.isFinite)) continue;
+    sum += Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    count += 1;
+  }
+  return count ? sum / count : NaN;
 }
 
 function clientRangeStartDate(range) {
@@ -177,6 +259,7 @@ function applyPayload(symbol, payload, range = state.range) {
   state.data[symbol] = payload;
   state.dataCache[symbol] = { ...(state.dataCache[symbol] || {}), [range]: payload };
   state.analysis[symbol] = analyzeSymbol(payload.bars);
+  persistChartCache();
   return payload;
 }
 
@@ -205,8 +288,13 @@ function clampForecastPrice(price, current, bars) {
   const minBar = Math.min(...lows);
   const maxBar = Math.max(...highs);
   const barRange = Math.max(1, maxBar - minBar);
-  const floor = Math.max(current * 0.35, minBar - barRange * 0.75, 0.01);
-  const ceiling = Math.max(maxBar + barRange * 1.5, current * 1.8);
+  const atr = calcATR(bars);
+  const recentBars = bars.slice(-80);
+  const recentLow = Math.min(...recentBars.map((bar) => bar.l));
+  const recentHigh = Math.max(...recentBars.map((bar) => bar.h));
+  const atrBand = Number.isFinite(atr) ? atr * 8 : barRange * 0.4;
+  const floor = Math.max(current * 0.55, recentLow - atrBand * 0.45, minBar - barRange * 0.28, 0.01);
+  const ceiling = Math.min(Math.max(maxBar + atrBand, current * 1.6), recentHigh + atrBand * 1.25 + barRange * 0.35);
   return clamp(price, floor, ceiling);
 }
 
@@ -294,17 +382,8 @@ async function fetchTicker(symbol) {
     const response = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(sourceRange)}`, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
-    const normalizedPayload = {
-      ...payload,
-      bars: payload.bars.map((bar) => ({
-      date: new Date(String(bar.date || "").includes("T") ? bar.date : `${bar.date}T00:00:00`),
-      o: Number(bar.open),
-      h: Number(bar.high),
-      l: Number(bar.low),
-      c: Number(bar.close),
-      v: Number(bar.volume || 0),
-      })),
-    };
+    const normalizedPayload = normalizePayload(payload);
+    if (!normalizedPayload) throw new Error("No usable chart payload.");
     state.dataCache[key] = { ...(state.dataCache[key] || {}), [state.range]: normalizedPayload };
     applyPayload(key, normalizedPayload, state.range);
     fetchFundamentals(key).catch(() => null);
@@ -2248,6 +2327,7 @@ function wireEvents() {
 
 async function init() {
   loadState();
+  loadPersistentChartCache();
   syncMobileModeUi();
   hydrateTooltips();
   wireTooltips();
