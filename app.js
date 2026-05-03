@@ -1,6 +1,7 @@
 const STORAGE_KEY = "stock-analysis-wavefront-lite-v1";
 const CHART_CACHE_KEY = "stock-analysis-wavefront-lite-chart-cache-v1";
 const CHART_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const CHART_CACHE_MAX_TEXT_BYTES = 900000;
 const DEFAULT_TICKERS = ["SPY", "AAPL", "MSFT", "TSLA"];
 const WAVE_COLORS = {
   "0": "#7e8da0",
@@ -65,6 +66,7 @@ const ctx = refs.canvas.getContext("2d");
 let panStart = null;
 const fundamentalsLoading = new Set();
 const pendingTickerFetches = new Map();
+let chartCachePersistTimer = null;
 const tooltipState = {
   target: null,
   text: "",
@@ -137,23 +139,42 @@ function normalizePayload(payload) {
 function persistChartCache() {
   try {
     const output = {};
-    Object.entries(state.dataCache).forEach(([symbol, ranges]) => {
+    state.tickers.slice(0, 12).forEach((symbol) => {
+      const ranges = state.dataCache[symbol] || {};
       const nextRanges = {};
-      Object.entries(ranges || {}).forEach(([range, payload]) => {
+      ["5d", "1mo", "3mo", "6mo", "ytd", "1y", "2y", "5y"].forEach((range) => {
+        const payload = ranges[range];
         const serialized = serializePayloadForStorage(payload);
-        if (serialized) nextRanges[range] = { time: Date.now(), payload: serialized };
+        if (!serialized) return;
+        nextRanges[range] = { time: Date.now(), payload: serialized };
       });
       if (Object.keys(nextRanges).length) output[symbol] = nextRanges;
     });
-    localStorage.setItem(CHART_CACHE_KEY, JSON.stringify(output));
+    const text = JSON.stringify(output);
+    if (text.length <= CHART_CACHE_MAX_TEXT_BYTES) {
+      localStorage.setItem(CHART_CACHE_KEY, text);
+    }
   } catch {
     // Ignore local storage quota/corruption issues.
   }
 }
 
+function schedulePersistChartCache() {
+  clearTimeout(chartCachePersistTimer);
+  chartCachePersistTimer = window.setTimeout(() => {
+    chartCachePersistTimer = null;
+    persistChartCache();
+  }, 250);
+}
+
 function loadPersistentChartCache() {
   try {
-    const raw = JSON.parse(localStorage.getItem(CHART_CACHE_KEY) || "{}");
+    const rawText = localStorage.getItem(CHART_CACHE_KEY) || "{}";
+    if (rawText.length > CHART_CACHE_MAX_TEXT_BYTES) {
+      localStorage.removeItem(CHART_CACHE_KEY);
+      return;
+    }
+    const raw = JSON.parse(rawText);
     Object.entries(raw).forEach(([symbol, ranges]) => {
       const nextRanges = {};
       Object.entries(ranges || {}).forEach(([range, entry]) => {
@@ -259,7 +280,7 @@ function applyPayload(symbol, payload, range = state.range) {
   state.data[symbol] = payload;
   state.dataCache[symbol] = { ...(state.dataCache[symbol] || {}), [range]: payload };
   state.analysis[symbol] = analyzeSymbol(payload.bars);
-  persistChartCache();
+  schedulePersistChartCache();
   return payload;
 }
 
@@ -2341,21 +2362,26 @@ async function init() {
   renderAll();
   const initialSelected = state.tickers.includes(state.selected) ? state.selected : state.tickers[0];
   if (initialSelected) {
-    await fetchTicker(initialSelected).catch((error) => {
-      console.warn(error);
-      return null;
-    });
-    renderAll();
-    state.tickers
-      .filter((symbol) => symbol !== initialSelected)
-      .forEach((symbol) => {
-        fetchTicker(symbol)
-          .catch((error) => {
-            console.warn(error);
-            return null;
-          })
-          .finally(() => renderWatchlist());
+    fetchTicker(initialSelected)
+      .catch((error) => {
+        console.warn(error);
+        return null;
+      })
+      .finally(() => {
+        renderAll();
       });
+    window.setTimeout(() => {
+      state.tickers
+        .filter((symbol) => symbol !== initialSelected)
+        .forEach((symbol) => {
+          fetchTicker(symbol)
+            .catch((error) => {
+              console.warn(error);
+              return null;
+            })
+            .finally(() => renderWatchlist());
+        });
+    }, 50);
   }
   if (!state.tickers.includes(state.selected)) state.selected = state.tickers[0];
   renderAll();
